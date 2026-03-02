@@ -1,0 +1,35 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: fun-ai-agent-plane
+  datasource:
+    url: "jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5432}/fun_ai_agent"
+    username: "${DB_USER:funai_agent}"
+    password: "${DB_PASSWORD:Ss123456!}"
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+app:
+  docker:
+    enabled: ${DOCKER_RUNTIME_ENABLED:true}
+    command: ${DOCKER_CMD:docker}
+    container-prefix: ${DOCKER_CONTAINER_PREFIX:funclaw}
+    restart-policy: ${DOCKER_RESTART_POLICY:unless-stopped}
+    gateway-host-port: ${DOCKER_GATEWAY_HOST_PORT:42617}
+    gateway-container-port: ${DOCKER_GATEWAY_CONTAINER_PORT:42617}
+    gateway-host: ${DOCKER_GATEWAY_HOST:0.0.0.0}
+    allow-public-bind: ${DOCKER_ALLOW_PUBLIC_BIND:true}
+    api-key: ${ZEROCLAW_API_KEY:}
+    stop-timeout-seconds: ${DOCKER_STOP_TIMEOUT_SECONDS:20}
+    command-timeout-seconds: ${DOCKER_COMMAND_TIMEOUT_SECONDS:120}
