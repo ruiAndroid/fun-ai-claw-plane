@@ -1,4 +1,4 @@
-package com.fun.ai.agent.plane.model;
+package com.fun.ai.claw.plane.model;
 
 public enum CommandType {
     INSTANCE_ACTION

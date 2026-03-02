@@ -1,4 +1,4 @@
-package com.fun.ai.agent.plane.model;
+package com.fun.ai.claw.plane.model;
 
 import java.time.Instant;
 import java.util.UUID;

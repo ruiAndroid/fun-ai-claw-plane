@@ -1,4 +1,4 @@
-package com.fun.ai.agent.plane.config;
+package com.fun.ai.claw.plane.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;

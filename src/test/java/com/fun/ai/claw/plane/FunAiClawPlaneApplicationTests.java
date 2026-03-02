@@ -1,10 +1,10 @@
-package com.fun.ai.agent.plane;
+package com.fun.ai.claw.plane;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class FunAiAgentPlaneApplicationTests {
+class FunAiClawPlaneApplicationTests {
 
     @Test
     void contextLoads() {

@@ -1,4 +1,4 @@
-# fun-ai-agent-plane
+# fun-ai-claw-plane
 
 Execution plane service for reconciling claw instance commands.
 
@@ -50,17 +50,17 @@ Docker-related environment variables:
 
 ## Update Script
 
-Use `update-agent-plane.sh` for one-command update on server:
+Use `update-claw-plane.sh` for one-command update on server:
 
 ```bash
-chmod +x /opt/fun-ai-agent-plane/update-agent-plane.sh
-/opt/fun-ai-agent-plane/update-agent-plane.sh
+chmod +x /opt/fun-ai-claw-plane/update-claw-plane.sh
+/opt/fun-ai-claw-plane/update-claw-plane.sh
 ```
 
 Optional environment variables:
 
-- `APP_DIR` (default: `/opt/fun-ai-agent-plane`)
-- `SERVICE_NAME` (default: `fun-ai-agent-plane`)
+- `APP_DIR` (default: `/opt/fun-ai-claw-plane`)
+- `SERVICE_NAME` (default: `fun-ai-claw-plane`)
 - `GIT_REMOTE` (default: `origin`)
 - `GIT_BRANCH` (default: `main`)
 - `HEALTH_URL` (default: `http://127.0.0.1:8090/internal/v1/health`)

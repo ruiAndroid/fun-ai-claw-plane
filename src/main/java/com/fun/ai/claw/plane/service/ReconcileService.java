@@ -1,10 +1,10 @@
-package com.fun.ai.agent.plane.service;
+package com.fun.ai.claw.plane.service;
 
-import com.fun.ai.agent.plane.model.CommandAction;
-import com.fun.ai.agent.plane.model.CommandType;
-import com.fun.ai.agent.plane.model.ReconcileCommandRequest;
-import com.fun.ai.agent.plane.model.TaskExecutionRecord;
-import com.fun.ai.agent.plane.model.TaskExecutionStatus;
+import com.fun.ai.claw.plane.model.CommandAction;
+import com.fun.ai.claw.plane.model.CommandType;
+import com.fun.ai.claw.plane.model.ReconcileCommandRequest;
+import com.fun.ai.claw.plane.model.TaskExecutionRecord;
+import com.fun.ai.claw.plane.model.TaskExecutionStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;

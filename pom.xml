@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.fun.ai</groupId>
-    <artifactId>fun-ai-agent-plane</artifactId>
+    <artifactId>fun-ai-claw-plane</artifactId>
     <version>0.1.0-SNAPSHOT</version>
-    <name>fun-ai-agent-plane</name>
-    <description>Execution control plane for fun-ai-agent platform</description>
+    <name>fun-ai-claw-plane</name>
+    <description>Execution control plane for fun-ai-claw platform</description>
 
     <properties>
         <java.version>17</java.version>

@@ -1,11 +1,11 @@
-package com.fun.ai.agent.plane.controller;
+package com.fun.ai.claw.plane.controller;
 
-import com.fun.ai.agent.plane.model.HealthResponse;
-import com.fun.ai.agent.plane.model.ListResponse;
-import com.fun.ai.agent.plane.model.ReconcileCommandRequest;
-import com.fun.ai.agent.plane.model.TaskExecutionRecord;
-import com.fun.ai.agent.plane.model.TaskExecutionStatus;
-import com.fun.ai.agent.plane.service.ReconcileService;
+import com.fun.ai.claw.plane.model.HealthResponse;
+import com.fun.ai.claw.plane.model.ListResponse;
+import com.fun.ai.claw.plane.model.ReconcileCommandRequest;
+import com.fun.ai.claw.plane.model.TaskExecutionRecord;
+import com.fun.ai.claw.plane.model.TaskExecutionStatus;
+import com.fun.ai.claw.plane.service.ReconcileService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,7 +32,7 @@ public class InternalController {
 
     @GetMapping("/health")
     public HealthResponse health() {
-        return new HealthResponse("UP", "fun-ai-agent-plane");
+        return new HealthResponse("UP", "fun-ai-claw-plane");
     }
 
     @PostMapping("/reconcile")
