@@ -187,6 +187,12 @@ public class DockerRuntimeService {
                 properties.getGatewayPublicUrlOption(),
                 resolveTemplate(properties.getGatewayPublicUrlTemplate(), instanceId, gatewayHostPort)
         );
+        appendGatewayOption(
+                command,
+                supportedOptions,
+                properties.getGatewayConfigDirOption(),
+                resolveTemplate(properties.getGatewayConfigDirTemplate(), instanceId, gatewayHostPort)
+        );
     }
 
     private void appendGatewayOption(List<String> command, Set<String> supportedOptions, String option, String value) {

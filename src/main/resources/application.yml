@@ -32,8 +32,10 @@ app:
     ui-path-routing-enabled: true
     gateway-base-path-template: /fun-claw/ui-controller/{instanceId}
     gateway-public-url-template: http://8.152.159.249/fun-claw/ui-controller/{instanceId}
+    gateway-config-dir-template: /data/zeroclaw
     gateway-base-path-option: --base-path
     gateway-public-url-option: --public-url
+    gateway-config-dir-option: --config-dir
     allow-public-bind: ${DOCKER_ALLOW_PUBLIC_BIND:true}
     api-key: ${ZEROCLAW_API_KEY:}
     stop-timeout-seconds: ${DOCKER_STOP_TIMEOUT_SECONDS:20}

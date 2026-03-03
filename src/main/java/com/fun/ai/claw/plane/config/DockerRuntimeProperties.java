@@ -17,8 +17,10 @@ public class DockerRuntimeProperties {
     private boolean uiPathRoutingEnabled = true;
     private String gatewayBasePathTemplate = "/fun-claw/ui-controller/{instanceId}";
     private String gatewayPublicUrlTemplate = "http://8.152.159.249/fun-claw/ui-controller/{instanceId}";
+    private String gatewayConfigDirTemplate = "/data/zeroclaw";
     private String gatewayBasePathOption = "--base-path";
     private String gatewayPublicUrlOption = "--public-url";
+    private String gatewayConfigDirOption = "--config-dir";
     private boolean allowPublicBind = true;
     private String apiKey;
     private long stopTimeoutSeconds = 20;
@@ -112,12 +114,28 @@ public class DockerRuntimeProperties {
         this.gatewayBasePathOption = gatewayBasePathOption;
     }
 
+    public String getGatewayConfigDirTemplate() {
+        return gatewayConfigDirTemplate;
+    }
+
+    public void setGatewayConfigDirTemplate(String gatewayConfigDirTemplate) {
+        this.gatewayConfigDirTemplate = gatewayConfigDirTemplate;
+    }
+
     public String getGatewayPublicUrlOption() {
         return gatewayPublicUrlOption;
     }
 
     public void setGatewayPublicUrlOption(String gatewayPublicUrlOption) {
         this.gatewayPublicUrlOption = gatewayPublicUrlOption;
+    }
+
+    public String getGatewayConfigDirOption() {
+        return gatewayConfigDirOption;
+    }
+
+    public void setGatewayConfigDirOption(String gatewayConfigDirOption) {
+        this.gatewayConfigDirOption = gatewayConfigDirOption;
     }
 
     public boolean isAllowPublicBind() {
