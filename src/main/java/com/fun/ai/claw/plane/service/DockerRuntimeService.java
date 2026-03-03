@@ -2,6 +2,8 @@ package com.fun.ai.claw.plane.service;
 
 import com.fun.ai.claw.plane.config.DockerRuntimeProperties;
 import com.fun.ai.claw.plane.model.CommandAction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -9,15 +11,24 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class DockerRuntimeService {
 
+    private static final Logger log = LoggerFactory.getLogger(DockerRuntimeService.class);
+    private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
+
     private final DockerRuntimeProperties properties;
+    private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
 
     public DockerRuntimeService(DockerRuntimeProperties properties) {
         this.properties = properties;
@@ -154,7 +165,76 @@ public class DockerRuntimeService {
         command.add(properties.getGatewayHost());
         command.add("--port");
         command.add(String.valueOf(properties.getGatewayContainerPort()));
+        appendGatewayPathRoutingArgs(command, image, instanceId, hostPort);
         runDockerChecked(command, "failed to create container");
+    }
+
+    private void appendGatewayPathRoutingArgs(List<String> command, String image, UUID instanceId, int gatewayHostPort) {
+        if (!properties.isUiPathRoutingEnabled()) {
+            return;
+        }
+
+        Set<String> supportedOptions = detectGatewayOptions(image);
+        appendGatewayOption(
+                command,
+                supportedOptions,
+                properties.getGatewayBasePathOption(),
+                resolveTemplate(properties.getGatewayBasePathTemplate(), instanceId, gatewayHostPort)
+        );
+        appendGatewayOption(
+                command,
+                supportedOptions,
+                properties.getGatewayPublicUrlOption(),
+                resolveTemplate(properties.getGatewayPublicUrlTemplate(), instanceId, gatewayHostPort)
+        );
+    }
+
+    private void appendGatewayOption(List<String> command, Set<String> supportedOptions, String option, String value) {
+        if (!StringUtils.hasText(option) || !StringUtils.hasText(value)) {
+            return;
+        }
+        String normalizedOption = option.trim();
+        if (!supportedOptions.contains(normalizedOption)) {
+            log.info("skip unsupported zeroclaw gateway option: {}", normalizedOption);
+            return;
+        }
+        command.add(normalizedOption);
+        command.add(value);
+    }
+
+    private String resolveTemplate(String template, UUID instanceId, int gatewayHostPort) {
+        if (!StringUtils.hasText(template)) {
+            return null;
+        }
+        return template.trim()
+                .replace("{instanceId}", instanceId.toString())
+                .replace("{gatewayHostPort}", String.valueOf(gatewayHostPort))
+                .replace("{gatewayContainerPort}", String.valueOf(properties.getGatewayContainerPort()));
+    }
+
+    private Set<String> detectGatewayOptions(String image) {
+        return gatewayOptionsByImage.computeIfAbsent(image, this::fetchGatewayOptions);
+    }
+
+    private Set<String> fetchGatewayOptions(String image) {
+        List<String> command = List.of(properties.getCommand(), "run", "--rm", image, "gateway", "--help");
+        CommandResult result = runDocker(command);
+        if (result.exitCode != 0) {
+            log.warn("failed to inspect zeroclaw gateway help for image {}: {}", image, result.output);
+            return Set.of();
+        }
+
+        Set<String> options = new HashSet<>();
+        Matcher matcher = LONG_OPTION_PATTERN.matcher(result.output);
+        while (matcher.find()) {
+            options.add(matcher.group());
+        }
+        if (options.isEmpty()) {
+            log.warn("no long options detected from zeroclaw gateway help for image {}", image);
+            return Set.of();
+        }
+        log.info("detected zeroclaw gateway options for image {}: {}", image, options);
+        return Set.copyOf(options);
     }
 
     private boolean containerExists(String containerName) {

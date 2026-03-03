@@ -14,6 +14,11 @@ public class DockerRuntimeProperties {
     private int gatewayHostPort = 42617;
     private int gatewayContainerPort = 42617;
     private String gatewayHost = "0.0.0.0";
+    private boolean uiPathRoutingEnabled = true;
+    private String gatewayBasePathTemplate = "/fun-claw/ui-controller/{instanceId}";
+    private String gatewayPublicUrlTemplate = "http://8.152.159.249/fun-claw/ui-controller/{instanceId}";
+    private String gatewayBasePathOption = "--base-path";
+    private String gatewayPublicUrlOption = "--public-url";
     private boolean allowPublicBind = true;
     private String apiKey;
     private long stopTimeoutSeconds = 20;
@@ -73,6 +78,46 @@ public class DockerRuntimeProperties {
 
     public void setGatewayHost(String gatewayHost) {
         this.gatewayHost = gatewayHost;
+    }
+
+    public boolean isUiPathRoutingEnabled() {
+        return uiPathRoutingEnabled;
+    }
+
+    public void setUiPathRoutingEnabled(boolean uiPathRoutingEnabled) {
+        this.uiPathRoutingEnabled = uiPathRoutingEnabled;
+    }
+
+    public String getGatewayBasePathTemplate() {
+        return gatewayBasePathTemplate;
+    }
+
+    public void setGatewayBasePathTemplate(String gatewayBasePathTemplate) {
+        this.gatewayBasePathTemplate = gatewayBasePathTemplate;
+    }
+
+    public String getGatewayPublicUrlTemplate() {
+        return gatewayPublicUrlTemplate;
+    }
+
+    public void setGatewayPublicUrlTemplate(String gatewayPublicUrlTemplate) {
+        this.gatewayPublicUrlTemplate = gatewayPublicUrlTemplate;
+    }
+
+    public String getGatewayBasePathOption() {
+        return gatewayBasePathOption;
+    }
+
+    public void setGatewayBasePathOption(String gatewayBasePathOption) {
+        this.gatewayBasePathOption = gatewayBasePathOption;
+    }
+
+    public String getGatewayPublicUrlOption() {
+        return gatewayPublicUrlOption;
+    }
+
+    public void setGatewayPublicUrlOption(String gatewayPublicUrlOption) {
+        this.gatewayPublicUrlOption = gatewayPublicUrlOption;
     }
 
     public boolean isAllowPublicBind() {
