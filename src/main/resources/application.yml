@@ -30,6 +30,6 @@ app:
     gateway-container-port: ${DOCKER_GATEWAY_CONTAINER_PORT:42617}
     gateway-host: ${DOCKER_GATEWAY_HOST:0.0.0.0}
     allow-public-bind: ${DOCKER_ALLOW_PUBLIC_BIND:true}
-    api-key: fun-ai-claw-fixed-2026
+    api-key: ${ZEROCLAW_API_KEY:}
     stop-timeout-seconds: ${DOCKER_STOP_TIMEOUT_SECONDS:20}
     command-timeout-seconds: ${DOCKER_COMMAND_TIMEOUT_SECONDS:120}
