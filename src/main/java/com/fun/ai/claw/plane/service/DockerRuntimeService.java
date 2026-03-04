@@ -29,6 +29,7 @@ public class DockerRuntimeService {
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
     private static final Pattern REQUIRE_PAIRING_PATTERN =
             Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
+    private static final Pattern GATEWAY_SECTION_PATTERN = Pattern.compile("(?m)^\\[gateway\\]\\s*$");
 
     private final DockerRuntimeProperties properties;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
@@ -314,7 +315,7 @@ public class DockerRuntimeService {
         }
 
         // Best-effort enforcement without relying on container sed/awk availability.
-        for (int attempt = 1; attempt <= 10; attempt++) {
+        for (int attempt = 1; attempt <= 30; attempt++) {
             CommandResult read = runDocker(List.of(
                     properties.getCommand(),
                     "exec",
@@ -323,28 +324,20 @@ public class DockerRuntimeService {
                     "cat",
                     "/data/zeroclaw/config.toml"
             ));
-            if (read.exitCode != 0 || read.output == null || read.output.isBlank()) {
-                if (attempt == 10) {
+            if (read.exitCode != 0 || read.output == null) {
+                if (attempt == 30) {
                     String details = read.output == null ? "" : read.output.trim();
                     log.warn("skip pairing enforcement for {}: unable to read config.toml ({})", containerName, details);
                 } else {
-                    sleepSilently(500L);
+                    sleepSilently(1000L);
                 }
                 continue;
             }
 
             String originalConfig = read.output;
-            String rewrittenConfig = REQUIRE_PAIRING_PATTERN.matcher(originalConfig).replaceAll("require_pairing = false");
-            if (rewrittenConfig.equals(originalConfig)) {
-                if (originalConfig.contains("require_pairing = false")) {
-                    return;
-                }
-                if (attempt == 10) {
-                    log.warn("skip pairing enforcement for {}: require_pairing key not found in config.toml", containerName);
-                } else {
-                    sleepSilently(500L);
-                }
-                continue;
+            String rewrittenConfig = rewriteRequirePairingToFalse(originalConfig);
+            if (rewrittenConfig.equals(originalConfig) && originalConfig.contains("require_pairing = false")) {
+                return;
             }
 
             CommandResult write = runDockerWithInput(
@@ -361,10 +354,10 @@ public class DockerRuntimeService {
                     rewrittenConfig.getBytes(StandardCharsets.UTF_8)
             );
             if (write.exitCode != 0) {
-                if (attempt == 10) {
+                if (attempt == 30) {
                     log.warn("skip pairing enforcement for {}: failed to write config.toml ({})", containerName, write.output.trim());
                 } else {
-                    sleepSilently(500L);
+                    sleepSilently(1000L);
                 }
                 continue;
             }
@@ -380,10 +373,10 @@ public class DockerRuntimeService {
                     "/data/zeroclaw/config.toml"
             ));
             if (verify.exitCode != 0) {
-                if (attempt == 10) {
+                if (attempt == 30) {
                     log.warn("pairing enforcement verify failed for {}: {}", containerName, verify.output.trim());
                 } else {
-                    sleepSilently(500L);
+                    sleepSilently(1000L);
                 }
                 continue;
             }
@@ -396,6 +389,31 @@ public class DockerRuntimeService {
             log.info("enforced require_pairing=false in {}", containerName);
             return;
         }
+    }
+
+    private String rewriteRequirePairingToFalse(String config) {
+        String original = config == null ? "" : config;
+        if (original.isBlank()) {
+            return "[gateway]\nrequire_pairing = false\n";
+        }
+
+        String replaced = REQUIRE_PAIRING_PATTERN.matcher(original).replaceAll("require_pairing = false");
+        if (!replaced.equals(original)) {
+            return replaced;
+        }
+
+        Matcher gatewayMatcher = GATEWAY_SECTION_PATTERN.matcher(original);
+        if (gatewayMatcher.find()) {
+            int insertPos = gatewayMatcher.end();
+            StringBuilder sb = new StringBuilder(original.length() + 30);
+            sb.append(original, 0, insertPos);
+            sb.append("\nrequire_pairing = false");
+            sb.append(original.substring(insertPos));
+            return sb.toString();
+        }
+
+        String suffix = original.endsWith("\n") ? "" : "\n";
+        return original + suffix + "[gateway]\nrequire_pairing = false\n";
     }
 
     private void sleepSilently(long millis) {
