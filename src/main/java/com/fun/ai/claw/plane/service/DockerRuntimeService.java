@@ -291,36 +291,60 @@ public class DockerRuntimeService {
             return;
         }
 
+        // Best-effort enforcement: do not fail instance lifecycle if image lacks expected shell/tools.
         CommandResult rewrite = runDocker(List.of(
                 properties.getCommand(),
                 "exec",
                 containerName,
-                "/bin/busybox",
-                "sh",
+                "/bin/sh",
                 "-c",
                 "sed -i 's/require_pairing = true/require_pairing = false/g' /data/zeroclaw/config.toml"
         ));
         if (rewrite.exitCode != 0) {
-            throw new DockerOperationException("failed to enforce require_pairing=false: " + rewrite.output.trim());
+            rewrite = runDocker(List.of(
+                    properties.getCommand(),
+                    "exec",
+                    containerName,
+                    "/bin/busybox",
+                    "sh",
+                    "-c",
+                    "sed -i 's/require_pairing = true/require_pairing = false/g' /data/zeroclaw/config.toml"
+            ));
+        }
+        if (rewrite.exitCode != 0) {
+            log.warn("skip pairing enforcement for {}: {}", containerName, rewrite.output.trim());
+            return;
         }
 
         CommandResult verify = runDocker(List.of(
                 properties.getCommand(),
                 "exec",
                 containerName,
-                "/bin/busybox",
-                "sh",
+                "/bin/sh",
                 "-c",
                 "grep -q 'require_pairing = false' /data/zeroclaw/config.toml"
         ));
         if (verify.exitCode != 0) {
-            throw new DockerOperationException("require_pairing=false not found after rewrite");
+            verify = runDocker(List.of(
+                    properties.getCommand(),
+                    "exec",
+                    containerName,
+                    "/bin/busybox",
+                    "sh",
+                    "-c",
+                    "grep -q 'require_pairing = false' /data/zeroclaw/config.toml"
+            ));
+        }
+        if (verify.exitCode != 0) {
+            log.warn("pairing enforcement verify failed for {}: {}", containerName, verify.output.trim());
+            return;
         }
 
-        runDockerChecked(
-                List.of(properties.getCommand(), "restart", containerName),
-                "failed to restart container after enforcing require_pairing=false"
-        );
+        CommandResult restart = runDocker(List.of(properties.getCommand(), "restart", containerName));
+        if (restart.exitCode != 0) {
+            log.warn("container restart after pairing enforcement failed for {}: {}", containerName, restart.output.trim());
+            return;
+        }
         log.info("enforced require_pairing=false in {}", containerName);
     }
 
