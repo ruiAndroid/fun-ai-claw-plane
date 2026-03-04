@@ -437,9 +437,9 @@ public class DockerRuntimeService {
             }
 
             String gatewaySection = original.substring(sectionStart, sectionEnd);
-            String rewrittenSection = ensureSettingLine(gatewaySection, REQUIRE_PAIRING_PATTERN, targetRequirePairing);
-            rewrittenSection = ensureSettingLine(rewrittenSection, GATEWAY_HOST_PATTERN, targetHostLine);
-            rewrittenSection = ensureSettingLine(rewrittenSection, ALLOW_PUBLIC_BIND_PATTERN, targetAllowPublicBind);
+            String rewrittenSection = setUniqueSettingLine(gatewaySection, REQUIRE_PAIRING_PATTERN, targetRequirePairing);
+            rewrittenSection = setUniqueSettingLine(rewrittenSection, GATEWAY_HOST_PATTERN, targetHostLine);
+            rewrittenSection = setUniqueSettingLine(rewrittenSection, ALLOW_PUBLIC_BIND_PATTERN, targetAllowPublicBind);
             if (rewrittenSection.equals(gatewaySection)) {
                 return original;
             }
@@ -453,15 +453,24 @@ public class DockerRuntimeService {
                 + targetAllowPublicBind + "\n";
     }
 
-    private String ensureSettingLine(String section, Pattern linePattern, String replacementLine) {
-        String replaced = linePattern.matcher(section).replaceAll(replacementLine);
-        if (!replaced.equals(section)) {
-            return replaced;
+    private String setUniqueSettingLine(String section, Pattern linePattern, String replacementLine) {
+        String[] lines = section.split("\\R", -1);
+        StringBuilder builder = new StringBuilder(section.length() + replacementLine.length() + 8);
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (linePattern.matcher(line).matches()) {
+                continue;
+            }
+            builder.append(line);
+            if (i < lines.length - 1) {
+                builder.append('\n');
+            }
         }
-        if (!replaced.endsWith("\n") && !replaced.isEmpty()) {
-            replaced += "\n";
+        String normalized = builder.toString();
+        if (!normalized.isEmpty() && !normalized.endsWith("\n")) {
+            normalized += "\n";
         }
-        return replaced + replacementLine + "\n";
+        return normalized + replacementLine + "\n";
     }
 
     private void sleepSilently(long millis) {
