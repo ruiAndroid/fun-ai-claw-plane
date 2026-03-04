@@ -347,9 +347,9 @@ public class DockerRuntimeService {
                             "-i",
                             containerName,
                             "/bin/busybox",
-                            "sh",
-                            "-c",
-                            "cat > /data/zeroclaw/config.toml"
+                            "dd",
+                            "of=/data/zeroclaw/config.toml",
+                            "conv=fsync"
                     ),
                     rewrittenConfig.getBytes(StandardCharsets.UTF_8)
             );
