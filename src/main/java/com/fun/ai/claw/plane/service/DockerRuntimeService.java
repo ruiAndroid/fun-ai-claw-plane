@@ -27,6 +27,8 @@ public class DockerRuntimeService {
 
     private static final Logger log = LoggerFactory.getLogger(DockerRuntimeService.class);
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
+    private static final Pattern REQUIRE_PAIRING_PATTERN =
+            Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
 
     private final DockerRuntimeProperties properties;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
@@ -62,6 +64,7 @@ public class DockerRuntimeService {
         }
 
         if (containerRunning(containerName)) {
+            enforceGatewayPairingPolicy(containerName);
             return "Container already running: " + containerName;
         }
 
@@ -311,64 +314,96 @@ public class DockerRuntimeService {
         }
 
         // Best-effort enforcement without relying on container sed/awk availability.
-        CommandResult read = runDocker(List.of(
-                properties.getCommand(),
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "cat",
-                "/data/zeroclaw/config.toml"
-        ));
-        if (read.exitCode != 0 || read.output == null || read.output.isBlank()) {
-            log.warn("skip pairing enforcement for {}: unable to read config.toml ({})", containerName, read.output.trim());
-            return;
-        }
+        for (int attempt = 1; attempt <= 10; attempt++) {
+            CommandResult read = runDocker(List.of(
+                    properties.getCommand(),
+                    "exec",
+                    containerName,
+                    "/bin/busybox",
+                    "cat",
+                    "/data/zeroclaw/config.toml"
+            ));
+            if (read.exitCode != 0 || read.output == null || read.output.isBlank()) {
+                if (attempt == 10) {
+                    String details = read.output == null ? "" : read.output.trim();
+                    log.warn("skip pairing enforcement for {}: unable to read config.toml ({})", containerName, details);
+                } else {
+                    sleepSilently(500L);
+                }
+                continue;
+            }
 
-        String originalConfig = read.output;
-        String rewrittenConfig = originalConfig.replaceAll("(?m)^\\s*require_pairing\\s*=\\s*true\\s*$", "require_pairing = false");
-        if (rewrittenConfig.equals(originalConfig)) {
-            return;
-        }
+            String originalConfig = read.output;
+            String rewrittenConfig = REQUIRE_PAIRING_PATTERN.matcher(originalConfig).replaceAll("require_pairing = false");
+            if (rewrittenConfig.equals(originalConfig)) {
+                if (originalConfig.contains("require_pairing = false")) {
+                    return;
+                }
+                if (attempt == 10) {
+                    log.warn("skip pairing enforcement for {}: require_pairing key not found in config.toml", containerName);
+                } else {
+                    sleepSilently(500L);
+                }
+                continue;
+            }
 
-        CommandResult write = runDockerWithInput(
-                List.of(
-                        properties.getCommand(),
-                        "exec",
-                        "-i",
-                        containerName,
-                        "/bin/busybox",
-                        "sh",
-                        "-c",
-                        "cat > /data/zeroclaw/config.toml"
-                ),
-                rewrittenConfig.getBytes(StandardCharsets.UTF_8)
-        );
-        if (write.exitCode != 0) {
-            log.warn("skip pairing enforcement for {}: failed to write config.toml ({})", containerName, write.output.trim());
-            return;
-        }
+            CommandResult write = runDockerWithInput(
+                    List.of(
+                            properties.getCommand(),
+                            "exec",
+                            "-i",
+                            containerName,
+                            "/bin/busybox",
+                            "sh",
+                            "-c",
+                            "cat > /data/zeroclaw/config.toml"
+                    ),
+                    rewrittenConfig.getBytes(StandardCharsets.UTF_8)
+            );
+            if (write.exitCode != 0) {
+                if (attempt == 10) {
+                    log.warn("skip pairing enforcement for {}: failed to write config.toml ({})", containerName, write.output.trim());
+                } else {
+                    sleepSilently(500L);
+                }
+                continue;
+            }
 
-        CommandResult verify = runDocker(List.of(
-                properties.getCommand(),
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "grep",
-                "-q",
-                "require_pairing = false",
-                "/data/zeroclaw/config.toml"
-        ));
-        if (verify.exitCode != 0) {
-            log.warn("pairing enforcement verify failed for {}: {}", containerName, verify.output.trim());
-            return;
-        }
+            CommandResult verify = runDocker(List.of(
+                    properties.getCommand(),
+                    "exec",
+                    containerName,
+                    "/bin/busybox",
+                    "grep",
+                    "-q",
+                    "require_pairing = false",
+                    "/data/zeroclaw/config.toml"
+            ));
+            if (verify.exitCode != 0) {
+                if (attempt == 10) {
+                    log.warn("pairing enforcement verify failed for {}: {}", containerName, verify.output.trim());
+                } else {
+                    sleepSilently(500L);
+                }
+                continue;
+            }
 
-        CommandResult restart = runDocker(List.of(properties.getCommand(), "restart", containerName));
-        if (restart.exitCode != 0) {
-            log.warn("container restart after pairing enforcement failed for {}: {}", containerName, restart.output.trim());
+            CommandResult restart = runDocker(List.of(properties.getCommand(), "restart", containerName));
+            if (restart.exitCode != 0) {
+                log.warn("container restart after pairing enforcement failed for {}: {}", containerName, restart.output.trim());
+                return;
+            }
+            log.info("enforced require_pairing=false in {}", containerName);
             return;
         }
-        log.info("enforced require_pairing=false in {}", containerName);
+    }
+
+    private void sleepSilently(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private CommandResult runDocker(List<String> command) {
