@@ -24,6 +24,10 @@ public class DockerRuntimeProperties {
     private boolean requirePairing = false;
     private String gatewayRequirePairingOption = "--require-pairing";
     private boolean allowPublicBind = true;
+    private boolean agentWorkspaceMountEnabled = false;
+    private String agentWorkspaceHostPathTemplate = "";
+    private String agentWorkspaceContainerPathTemplate = "/workspace/agent-mgc-novel-script";
+    private boolean agentWorkspaceMountReadOnly = true;
     private String apiKey;
     private long stopTimeoutSeconds = 20;
     private long commandTimeoutSeconds = 120;
@@ -162,6 +166,38 @@ public class DockerRuntimeProperties {
 
     public void setAllowPublicBind(boolean allowPublicBind) {
         this.allowPublicBind = allowPublicBind;
+    }
+
+    public boolean isAgentWorkspaceMountEnabled() {
+        return agentWorkspaceMountEnabled;
+    }
+
+    public void setAgentWorkspaceMountEnabled(boolean agentWorkspaceMountEnabled) {
+        this.agentWorkspaceMountEnabled = agentWorkspaceMountEnabled;
+    }
+
+    public String getAgentWorkspaceHostPathTemplate() {
+        return agentWorkspaceHostPathTemplate;
+    }
+
+    public void setAgentWorkspaceHostPathTemplate(String agentWorkspaceHostPathTemplate) {
+        this.agentWorkspaceHostPathTemplate = agentWorkspaceHostPathTemplate;
+    }
+
+    public String getAgentWorkspaceContainerPathTemplate() {
+        return agentWorkspaceContainerPathTemplate;
+    }
+
+    public void setAgentWorkspaceContainerPathTemplate(String agentWorkspaceContainerPathTemplate) {
+        this.agentWorkspaceContainerPathTemplate = agentWorkspaceContainerPathTemplate;
+    }
+
+    public boolean isAgentWorkspaceMountReadOnly() {
+        return agentWorkspaceMountReadOnly;
+    }
+
+    public void setAgentWorkspaceMountReadOnly(boolean agentWorkspaceMountReadOnly) {
+        this.agentWorkspaceMountReadOnly = agentWorkspaceMountReadOnly;
     }
 
     public String getApiKey() {

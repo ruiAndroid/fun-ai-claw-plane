@@ -164,6 +164,7 @@ public class DockerRuntimeService {
             command.add("--restart");
             command.add(properties.getRestartPolicy().trim());
         }
+        appendAgentWorkspaceMountArgs(command, instanceId, hostPort);
         command.add(image);
         command.add("gateway");
         command.add("--host");
@@ -174,6 +175,23 @@ public class DockerRuntimeService {
         appendGatewaySecurityArgs(command, supportedOptions);
         appendGatewayPathRoutingArgs(command, supportedOptions, instanceId, hostPort);
         runDockerChecked(command, "failed to create container");
+    }
+
+    private void appendAgentWorkspaceMountArgs(List<String> command, UUID instanceId, int gatewayHostPort) {
+        if (!properties.isAgentWorkspaceMountEnabled()) {
+            return;
+        }
+        String hostPath = resolveTemplate(properties.getAgentWorkspaceHostPathTemplate(), instanceId, gatewayHostPort);
+        String containerPath = resolveTemplate(properties.getAgentWorkspaceContainerPathTemplate(), instanceId, gatewayHostPort);
+        if (!StringUtils.hasText(hostPath) || !StringUtils.hasText(containerPath)) {
+            log.warn("skip agent workspace mount because hostPath or containerPath is blank");
+            return;
+        }
+        String mountExpr = properties.isAgentWorkspaceMountReadOnly()
+                ? hostPath.trim() + ":" + containerPath.trim() + ":ro"
+                : hostPath.trim() + ":" + containerPath.trim();
+        command.add("-v");
+        command.add(mountExpr);
     }
 
     private void appendGatewaySecurityArgs(List<String> command, Set<String> supportedOptions) {

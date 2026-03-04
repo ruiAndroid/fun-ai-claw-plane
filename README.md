@@ -44,9 +44,24 @@ Docker-related environment variables:
 - `DOCKER_GATEWAY_CONTAINER_PORT` (default: `42617`)
 - `DOCKER_GATEWAY_HOST` (default: `0.0.0.0`)
 - `DOCKER_ALLOW_PUBLIC_BIND` (default: `true`)
+- `DOCKER_AGENT_WORKSPACE_MOUNT_ENABLED` (default: `false`, optional env override)
+- `DOCKER_AGENT_WORKSPACE_HOST_PATH_TEMPLATE` (default: empty, optional env override)
+- `DOCKER_AGENT_WORKSPACE_CONTAINER_PATH_TEMPLATE` (default: `/workspace/agent-mgc-novel-script`, optional env override)
+- `DOCKER_AGENT_WORKSPACE_MOUNT_READ_ONLY` (default: `true`, optional env override)
 - `ZEROCLAW_API_KEY` (default: empty)
 - `DOCKER_STOP_TIMEOUT_SECONDS` (default: `20`)
 - `DOCKER_COMMAND_TIMEOUT_SECONDS` (default: `120`)
+
+Recommended (config file first): set these in `src/main/resources/application.yml` under `app.docker`.
+
+Example env overrides (optional):
+
+```bash
+export DOCKER_AGENT_WORKSPACE_MOUNT_ENABLED=true
+export DOCKER_AGENT_WORKSPACE_HOST_PATH_TEMPLATE=/opt/agents/agent-mgc-novel-script
+export DOCKER_AGENT_WORKSPACE_CONTAINER_PATH_TEMPLATE=/workspace/agent-mgc-novel-script
+export DOCKER_AGENT_WORKSPACE_MOUNT_READ_ONLY=true
+```
 
 ## Update Script
 
