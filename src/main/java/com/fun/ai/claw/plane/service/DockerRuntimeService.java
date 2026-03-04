@@ -9,6 +9,7 @@ import org.springframework.util.StringUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -309,28 +310,41 @@ public class DockerRuntimeService {
             return;
         }
 
-        // Best-effort enforcement: do not fail instance lifecycle if image lacks expected shell/tools.
-        CommandResult rewrite = runDocker(List.of(
+        // Best-effort enforcement without relying on container sed/awk availability.
+        CommandResult read = runDocker(List.of(
                 properties.getCommand(),
                 "exec",
                 containerName,
-                "/bin/sh",
-                "-c",
-                "sed -i 's/require_pairing = true/require_pairing = false/g' /data/zeroclaw/config.toml"
+                "/bin/busybox",
+                "cat",
+                "/data/zeroclaw/config.toml"
         ));
-        if (rewrite.exitCode != 0) {
-            rewrite = runDocker(List.of(
-                    properties.getCommand(),
-                    "exec",
-                    containerName,
-                    "/bin/busybox",
-                    "sh",
-                    "-c",
-                    "sed -i 's/require_pairing = true/require_pairing = false/g' /data/zeroclaw/config.toml"
-            ));
+        if (read.exitCode != 0 || read.output == null || read.output.isBlank()) {
+            log.warn("skip pairing enforcement for {}: unable to read config.toml ({})", containerName, read.output.trim());
+            return;
         }
-        if (rewrite.exitCode != 0) {
-            log.warn("skip pairing enforcement for {}: {}", containerName, rewrite.output.trim());
+
+        String originalConfig = read.output;
+        String rewrittenConfig = originalConfig.replaceAll("(?m)^\\s*require_pairing\\s*=\\s*true\\s*$", "require_pairing = false");
+        if (rewrittenConfig.equals(originalConfig)) {
+            return;
+        }
+
+        CommandResult write = runDockerWithInput(
+                List.of(
+                        properties.getCommand(),
+                        "exec",
+                        "-i",
+                        containerName,
+                        "/bin/busybox",
+                        "sh",
+                        "-c",
+                        "cat > /data/zeroclaw/config.toml"
+                ),
+                rewrittenConfig.getBytes(StandardCharsets.UTF_8)
+        );
+        if (write.exitCode != 0) {
+            log.warn("skip pairing enforcement for {}: failed to write config.toml ({})", containerName, write.output.trim());
             return;
         }
 
@@ -338,21 +352,12 @@ public class DockerRuntimeService {
                 properties.getCommand(),
                 "exec",
                 containerName,
-                "/bin/sh",
-                "-c",
-                "grep -q 'require_pairing = false' /data/zeroclaw/config.toml"
+                "/bin/busybox",
+                "grep",
+                "-q",
+                "require_pairing = false",
+                "/data/zeroclaw/config.toml"
         ));
-        if (verify.exitCode != 0) {
-            verify = runDocker(List.of(
-                    properties.getCommand(),
-                    "exec",
-                    containerName,
-                    "/bin/busybox",
-                    "sh",
-                    "-c",
-                    "grep -q 'require_pairing = false' /data/zeroclaw/config.toml"
-            ));
-        }
         if (verify.exitCode != 0) {
             log.warn("pairing enforcement verify failed for {}: {}", containerName, verify.output.trim());
             return;
@@ -371,6 +376,36 @@ public class DockerRuntimeService {
         processBuilder.redirectErrorStream(true);
         try {
             Process process = processBuilder.start();
+            process.getOutputStream().close();
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            process.getInputStream().transferTo(output);
+            boolean finished = process.waitFor(properties.getCommandTimeoutSeconds(), TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                throw new DockerOperationException("docker command timed out");
+            }
+            return new CommandResult(process.exitValue(), output.toString(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new DockerOperationException("failed to execute docker command: " + ex.getMessage());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new DockerOperationException("docker command interrupted");
+        }
+    }
+
+    private CommandResult runDockerWithInput(List<String> command, byte[] stdinBytes) {
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+        try {
+            Process process = processBuilder.start();
+            if (stdinBytes != null && stdinBytes.length > 0) {
+                try (OutputStream os = process.getOutputStream()) {
+                    os.write(stdinBytes);
+                    os.flush();
+                }
+            } else {
+                process.getOutputStream().close();
+            }
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             process.getInputStream().transferTo(output);
             boolean finished = process.waitFor(properties.getCommandTimeoutSeconds(), TimeUnit.SECONDS);
