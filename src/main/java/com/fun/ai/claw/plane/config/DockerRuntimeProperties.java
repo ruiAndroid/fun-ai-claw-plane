@@ -24,6 +24,10 @@ public class DockerRuntimeProperties {
     private boolean requirePairing = false;
     private String gatewayRequirePairingOption = "--require-pairing";
     private boolean allowPublicBind = true;
+    private long gatewayReadyTimeoutSeconds = 30;
+    private long gatewayReadyProbeIntervalMillis = 500;
+    private String gatewayReadyHost = "127.0.0.1";
+    private String gatewayReadyPath = "/health";
     private boolean agentWorkspaceMountEnabled = false;
     private String agentWorkspaceHostPathTemplate = "";
     private String agentWorkspaceContainerPathTemplate = "/workspace/agent-mgc-novel-script";
@@ -166,6 +170,38 @@ public class DockerRuntimeProperties {
 
     public void setAllowPublicBind(boolean allowPublicBind) {
         this.allowPublicBind = allowPublicBind;
+    }
+
+    public long getGatewayReadyTimeoutSeconds() {
+        return gatewayReadyTimeoutSeconds;
+    }
+
+    public void setGatewayReadyTimeoutSeconds(long gatewayReadyTimeoutSeconds) {
+        this.gatewayReadyTimeoutSeconds = gatewayReadyTimeoutSeconds;
+    }
+
+    public long getGatewayReadyProbeIntervalMillis() {
+        return gatewayReadyProbeIntervalMillis;
+    }
+
+    public void setGatewayReadyProbeIntervalMillis(long gatewayReadyProbeIntervalMillis) {
+        this.gatewayReadyProbeIntervalMillis = gatewayReadyProbeIntervalMillis;
+    }
+
+    public String getGatewayReadyHost() {
+        return gatewayReadyHost;
+    }
+
+    public void setGatewayReadyHost(String gatewayReadyHost) {
+        this.gatewayReadyHost = gatewayReadyHost;
+    }
+
+    public String getGatewayReadyPath() {
+        return gatewayReadyPath;
+    }
+
+    public void setGatewayReadyPath(String gatewayReadyPath) {
+        this.gatewayReadyPath = gatewayReadyPath;
     }
 
     public boolean isAgentWorkspaceMountEnabled() {

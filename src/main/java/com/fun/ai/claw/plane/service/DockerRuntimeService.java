@@ -10,7 +10,12 @@ import org.springframework.util.StringUtils;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -29,13 +34,22 @@ public class DockerRuntimeService {
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
     private static final Pattern REQUIRE_PAIRING_PATTERN =
             Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
+    private static final Pattern GATEWAY_HOST_PATTERN =
+            Pattern.compile("(?m)^\\s*host\\s*=\\s*\"[^\"]*\"\\s*$");
+    private static final Pattern ALLOW_PUBLIC_BIND_PATTERN =
+            Pattern.compile("(?m)^\\s*allow_public_bind\\s*=\\s*(true|false)\\s*$");
     private static final Pattern GATEWAY_SECTION_PATTERN = Pattern.compile("(?m)^\\[gateway\\]\\s*$");
+    private static final Pattern SECTION_HEADER_PATTERN = Pattern.compile("(?m)^\\[[^\\]]+\\]\\s*$");
 
     private final DockerRuntimeProperties properties;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
+    private final HttpClient healthProbeClient;
 
     public DockerRuntimeService(DockerRuntimeProperties properties) {
         this.properties = properties;
+        this.healthProbeClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(2))
+                .build();
     }
 
     public String execute(UUID instanceId, CommandAction action, Map<String, Object> payload) {
@@ -66,12 +80,14 @@ public class DockerRuntimeService {
 
         if (containerRunning(containerName)) {
             enforceGatewayPairingPolicy(containerName);
+            waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             return "Container already running: " + containerName;
         }
 
         try {
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
             enforceGatewayPairingPolicy(containerName);
+            waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
             if (createdNow) {
                 removeContainerQuietly(containerName);
@@ -105,6 +121,7 @@ public class DockerRuntimeService {
             try {
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
                 enforceGatewayPairingPolicy(containerName);
+                waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
                 removeContainerQuietly(containerName);
                 throw ex;
@@ -114,6 +131,7 @@ public class DockerRuntimeService {
 
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
         enforceGatewayPairingPolicy(containerName);
+        waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
     }
 
@@ -335,8 +353,8 @@ public class DockerRuntimeService {
             }
 
             String originalConfig = read.output;
-            String rewrittenConfig = rewriteRequirePairingToFalse(originalConfig);
-            if (rewrittenConfig.equals(originalConfig) && originalConfig.contains("require_pairing = false")) {
+            String rewrittenConfig = rewriteGatewaySettings(originalConfig);
+            if (rewrittenConfig.equals(originalConfig)) {
                 return;
             }
 
@@ -391,29 +409,59 @@ public class DockerRuntimeService {
         }
     }
 
-    private String rewriteRequirePairingToFalse(String config) {
+    private String rewriteGatewaySettings(String config) {
         String original = config == null ? "" : config;
+        String targetHost = StringUtils.hasText(properties.getGatewayHost())
+                ? properties.getGatewayHost().trim()
+                : "0.0.0.0";
+        String targetRequirePairing = "require_pairing = false";
+        String targetAllowPublicBind = "allow_public_bind = " + properties.isAllowPublicBind();
+        String targetHostLine = "host = \"" + targetHost + "\"";
         if (original.isBlank()) {
-            return "[gateway]\nrequire_pairing = false\n";
-        }
-
-        String replaced = REQUIRE_PAIRING_PATTERN.matcher(original).replaceAll("require_pairing = false");
-        if (!replaced.equals(original)) {
-            return replaced;
+            return "[gateway]\n"
+                    + targetHostLine + "\n"
+                    + targetRequirePairing + "\n"
+                    + targetAllowPublicBind + "\n";
         }
 
         Matcher gatewayMatcher = GATEWAY_SECTION_PATTERN.matcher(original);
         if (gatewayMatcher.find()) {
-            int insertPos = gatewayMatcher.end();
-            StringBuilder sb = new StringBuilder(original.length() + 30);
-            sb.append(original, 0, insertPos);
-            sb.append("\nrequire_pairing = false");
-            sb.append(original.substring(insertPos));
-            return sb.toString();
+            int sectionStart = gatewayMatcher.end();
+            int sectionEnd = original.length();
+            Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(original);
+            while (sectionHeaderMatcher.find(sectionStart)) {
+                if (sectionHeaderMatcher.start() > sectionStart) {
+                    sectionEnd = sectionHeaderMatcher.start();
+                    break;
+                }
+            }
+
+            String gatewaySection = original.substring(sectionStart, sectionEnd);
+            String rewrittenSection = ensureSettingLine(gatewaySection, REQUIRE_PAIRING_PATTERN, targetRequirePairing);
+            rewrittenSection = ensureSettingLine(rewrittenSection, GATEWAY_HOST_PATTERN, targetHostLine);
+            rewrittenSection = ensureSettingLine(rewrittenSection, ALLOW_PUBLIC_BIND_PATTERN, targetAllowPublicBind);
+            if (rewrittenSection.equals(gatewaySection)) {
+                return original;
+            }
+            return original.substring(0, sectionStart) + rewrittenSection + original.substring(sectionEnd);
         }
 
         String suffix = original.endsWith("\n") ? "" : "\n";
-        return original + suffix + "[gateway]\nrequire_pairing = false\n";
+        return original + suffix + "[gateway]\n"
+                + targetHostLine + "\n"
+                + targetRequirePairing + "\n"
+                + targetAllowPublicBind + "\n";
+    }
+
+    private String ensureSettingLine(String section, Pattern linePattern, String replacementLine) {
+        String replaced = linePattern.matcher(section).replaceAll(replacementLine);
+        if (!replaced.equals(section)) {
+            return replaced;
+        }
+        if (!replaced.endsWith("\n") && !replaced.isEmpty()) {
+            replaced += "\n";
+        }
+        return replaced + replacementLine + "\n";
     }
 
     private void sleepSilently(long millis) {
@@ -422,6 +470,102 @@ public class DockerRuntimeService {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private Integer resolveGatewayHostPortForProbe(String containerName, Integer requestedPort) {
+        if (requestedPort != null && requestedPort > 0 && requestedPort <= 65535) {
+            return requestedPort;
+        }
+        CommandResult result = runDocker(List.of(
+                properties.getCommand(),
+                "port",
+                containerName,
+                properties.getGatewayContainerPort() + "/tcp"
+        ));
+        if (result.exitCode != 0 || !StringUtils.hasText(result.output)) {
+            return null;
+        }
+        String[] lines = result.output.split("\\R");
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (!StringUtils.hasText(line)) {
+                continue;
+            }
+            int lastColon = line.lastIndexOf(':');
+            if (lastColon < 0 || lastColon == line.length() - 1) {
+                continue;
+            }
+            String maybePort = line.substring(lastColon + 1).trim();
+            try {
+                int parsed = Integer.parseInt(maybePort);
+                if (parsed > 0 && parsed <= 65535) {
+                    return parsed;
+                }
+            } catch (NumberFormatException ignored) {
+                // Continue parsing other lines.
+            }
+        }
+        return null;
+    }
+
+    private void waitForGatewayReady(String containerName, Integer gatewayHostPort) {
+        if (gatewayHostPort == null) {
+            log.warn("skip gateway readiness check for {}: gateway host port is unknown", containerName);
+            return;
+        }
+
+        long timeoutSeconds = properties.getGatewayReadyTimeoutSeconds() > 0
+                ? properties.getGatewayReadyTimeoutSeconds()
+                : 30L;
+        long intervalMillis = properties.getGatewayReadyProbeIntervalMillis() > 0
+                ? properties.getGatewayReadyProbeIntervalMillis()
+                : 500L;
+        String readyHost = StringUtils.hasText(properties.getGatewayReadyHost())
+                ? properties.getGatewayReadyHost().trim()
+                : "127.0.0.1";
+        String readyPath = StringUtils.hasText(properties.getGatewayReadyPath())
+                ? properties.getGatewayReadyPath().trim()
+                : "/health";
+        if (!readyPath.startsWith("/")) {
+            readyPath = "/" + readyPath;
+        }
+
+        URI uri = URI.create("http://" + readyHost + ":" + gatewayHostPort + readyPath);
+        long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+        String lastError = "unknown";
+
+        while (System.currentTimeMillis() <= deadline) {
+            if (!containerRunning(containerName)) {
+                lastError = "container is not running";
+                sleepSilently(intervalMillis);
+                continue;
+            }
+
+            try {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(uri)
+                        .timeout(Duration.ofSeconds(2))
+                        .GET()
+                        .build();
+                HttpResponse<Void> response = healthProbeClient.send(request, HttpResponse.BodyHandlers.discarding());
+                int code = response.statusCode();
+                if (code >= 200 && code < 300) {
+                    return;
+                }
+                lastError = "http status " + code;
+            } catch (IOException ex) {
+                lastError = ex.getMessage();
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new DockerOperationException("gateway readiness check interrupted");
+            }
+            sleepSilently(intervalMillis);
+        }
+
+        throw new DockerOperationException(
+                "gateway not ready after " + timeoutSeconds + "s for " + containerName
+                        + " at " + uri + " (last error: " + lastError + ")"
+        );
     }
 
     private CommandResult runDocker(List<String> command) {
