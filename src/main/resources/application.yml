@@ -36,6 +36,8 @@ app:
     gateway-base-path-option: --base-path
     gateway-public-url-option: --public-url
     gateway-config-dir-option: --config-dir
+    require-pairing: ${DOCKER_REQUIRE_PAIRING:false}
+    gateway-require-pairing-option: --require-pairing
     allow-public-bind: ${DOCKER_ALLOW_PUBLIC_BIND:true}
     api-key: ${ZEROCLAW_API_KEY:}
     stop-timeout-seconds: ${DOCKER_STOP_TIMEOUT_SECONDS:20}

@@ -151,6 +151,8 @@ public class DockerRuntimeService {
         command.add("ZEROCLAW_GATEWAY_PORT=" + properties.getGatewayContainerPort());
         command.add("-e");
         command.add("ZEROCLAW_ALLOW_PUBLIC_BIND=" + properties.isAllowPublicBind());
+        command.add("-e");
+        command.add("ZEROCLAW_REQUIRE_PAIRING=" + properties.isRequirePairing());
         if (StringUtils.hasText(properties.getApiKey())) {
             command.add("-e");
             command.add("API_KEY=" + properties.getApiKey().trim());
@@ -165,16 +167,28 @@ public class DockerRuntimeService {
         command.add(properties.getGatewayHost());
         command.add("--port");
         command.add(String.valueOf(properties.getGatewayContainerPort()));
-        appendGatewayPathRoutingArgs(command, image, instanceId, hostPort);
+        Set<String> supportedOptions = detectGatewayOptions(image);
+        appendGatewaySecurityArgs(command, supportedOptions);
+        appendGatewayPathRoutingArgs(command, supportedOptions, instanceId, hostPort);
         runDockerChecked(command, "failed to create container");
     }
 
-    private void appendGatewayPathRoutingArgs(List<String> command, String image, UUID instanceId, int gatewayHostPort) {
+    private void appendGatewaySecurityArgs(List<String> command, Set<String> supportedOptions) {
+        appendGatewayOption(
+                command,
+                supportedOptions,
+                properties.getGatewayRequirePairingOption(),
+                String.valueOf(properties.isRequirePairing())
+        );
+    }
+
+    private void appendGatewayPathRoutingArgs(List<String> command,
+                                              Set<String> supportedOptions,
+                                              UUID instanceId,
+                                              int gatewayHostPort) {
         if (!properties.isUiPathRoutingEnabled()) {
             return;
         }
-
-        Set<String> supportedOptions = detectGatewayOptions(image);
         appendGatewayOption(
                 command,
                 supportedOptions,

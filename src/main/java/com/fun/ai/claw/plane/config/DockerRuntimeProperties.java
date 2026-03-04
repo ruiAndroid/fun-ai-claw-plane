@@ -21,6 +21,8 @@ public class DockerRuntimeProperties {
     private String gatewayBasePathOption = "--base-path";
     private String gatewayPublicUrlOption = "--public-url";
     private String gatewayConfigDirOption = "--config-dir";
+    private boolean requirePairing = false;
+    private String gatewayRequirePairingOption = "--require-pairing";
     private boolean allowPublicBind = true;
     private String apiKey;
     private long stopTimeoutSeconds = 20;
@@ -136,6 +138,22 @@ public class DockerRuntimeProperties {
 
     public void setGatewayConfigDirOption(String gatewayConfigDirOption) {
         this.gatewayConfigDirOption = gatewayConfigDirOption;
+    }
+
+    public boolean isRequirePairing() {
+        return requirePairing;
+    }
+
+    public void setRequirePairing(boolean requirePairing) {
+        this.requirePairing = requirePairing;
+    }
+
+    public String getGatewayRequirePairingOption() {
+        return gatewayRequirePairingOption;
+    }
+
+    public void setGatewayRequirePairingOption(String gatewayRequirePairingOption) {
+        this.gatewayRequirePairingOption = gatewayRequirePairingOption;
     }
 
     public boolean isAllowPublicBind() {
