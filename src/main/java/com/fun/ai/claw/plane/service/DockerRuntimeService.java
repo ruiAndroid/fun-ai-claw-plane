@@ -66,6 +66,7 @@ public class DockerRuntimeService {
 
         try {
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
+            enforceGatewayPairingPolicy(containerName);
         } catch (DockerOperationException ex) {
             if (createdNow) {
                 removeContainerQuietly(containerName);
@@ -98,6 +99,7 @@ public class DockerRuntimeService {
             createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
             try {
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
+                enforceGatewayPairingPolicy(containerName);
             } catch (DockerOperationException ex) {
                 removeContainerQuietly(containerName);
                 throw ex;
@@ -106,6 +108,7 @@ public class DockerRuntimeService {
         }
 
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
+        enforceGatewayPairingPolicy(containerName);
         return "Container restarted: " + containerName;
     }
 
@@ -281,6 +284,44 @@ public class DockerRuntimeService {
 
     private void removeContainerQuietly(String containerName) {
         runDocker(List.of(properties.getCommand(), "rm", containerName));
+    }
+
+    private void enforceGatewayPairingPolicy(String containerName) {
+        if (properties.isRequirePairing()) {
+            return;
+        }
+
+        CommandResult rewrite = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "sh",
+                "-c",
+                "sed -i 's/require_pairing = true/require_pairing = false/g' /data/zeroclaw/config.toml"
+        ));
+        if (rewrite.exitCode != 0) {
+            throw new DockerOperationException("failed to enforce require_pairing=false: " + rewrite.output.trim());
+        }
+
+        CommandResult verify = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "sh",
+                "-c",
+                "grep -q 'require_pairing = false' /data/zeroclaw/config.toml"
+        ));
+        if (verify.exitCode != 0) {
+            throw new DockerOperationException("require_pairing=false not found after rewrite");
+        }
+
+        runDockerChecked(
+                List.of(properties.getCommand(), "restart", containerName),
+                "failed to restart container after enforcing require_pairing=false"
+        );
+        log.info("enforced require_pairing=false in {}", containerName);
     }
 
     private CommandResult runDocker(List<String> command) {
