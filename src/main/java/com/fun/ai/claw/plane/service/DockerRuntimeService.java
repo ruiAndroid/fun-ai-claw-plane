@@ -63,7 +63,6 @@ public class DockerRuntimeService {
             case START -> startInstance(instanceId, image, gatewayHostPort);
             case STOP -> stopInstance(instanceId);
             case RESTART, ROLLBACK -> restartInstance(instanceId, image, gatewayHostPort);
-            case RESTART_CLAW -> restartClawProcess(instanceId, gatewayHostPort);
             case DELETE -> deleteInstance(instanceId);
         };
     }
@@ -134,42 +133,6 @@ public class DockerRuntimeService {
         enforceGatewayPairingPolicy(containerName);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
-    }
-
-    private String restartClawProcess(UUID instanceId, Integer gatewayHostPort) {
-        String containerName = containerName(instanceId);
-        if (!containerExists(containerName)) {
-            throw new DockerOperationException("container not found, cannot restart zeroclaw process: " + containerName);
-        }
-        if (!containerRunning(containerName)) {
-            throw new DockerOperationException("container is not running, cannot restart zeroclaw process: " + containerName);
-        }
-
-        CommandResult hupResult = runDocker(List.of(
-                properties.getCommand(),
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "kill",
-                "-HUP",
-                "1"
-        ));
-        if (hupResult.exitCode != 0) {
-            runDockerChecked(
-                    List.of(
-                            properties.getCommand(),
-                            "exec",
-                            containerName,
-                            "/bin/sh",
-                            "-c",
-                            "kill -HUP 1"
-                    ),
-                    "failed to send HUP signal to zeroclaw process"
-            );
-        }
-
-        waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
-        return "ZeroClaw process restart signal sent: " + containerName;
     }
 
     private String deleteInstance(UUID instanceId) {

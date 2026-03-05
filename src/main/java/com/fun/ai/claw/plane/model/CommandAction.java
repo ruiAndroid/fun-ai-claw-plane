@@ -4,7 +4,6 @@ public enum CommandAction {
     START,
     STOP,
     RESTART,
-    RESTART_CLAW,
     ROLLBACK,
     DELETE
 }
