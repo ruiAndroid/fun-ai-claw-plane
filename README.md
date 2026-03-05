@@ -48,9 +48,15 @@ Docker-related environment variables:
 - `DOCKER_AGENT_WORKSPACE_HOST_PATH_TEMPLATE` (default: empty, optional env override)
 - `DOCKER_AGENT_WORKSPACE_CONTAINER_PATH_TEMPLATE` (default: `/workspace/agent-mgc-novel-script`, optional env override)
 - `DOCKER_AGENT_WORKSPACE_MOUNT_READ_ONLY` (default: `true`, optional env override)
+- `DOCKER_WORKSPACE_AGENTS_AUTO_SYNC_ENABLED` (default: `true`)
+- `DOCKER_WORKSPACE_AGENTS_FILE_PATH` (default: `/zeroclaw-data/workspace/AGENTS.md`)
 - `ZEROCLAW_API_KEY` (default: empty)
 - `DOCKER_STOP_TIMEOUT_SECONDS` (default: `20`)
 - `DOCKER_COMMAND_TIMEOUT_SECONDS` (default: `120`)
+
+Notes:
+- `workspace-agents-file-path` should be an absolute container path.
+- If runtime receives empty `agentsMdContent` with overwrite enabled, it will overwrite/clear existing workspace `AGENTS.md` to avoid stale prompts.
 
 Recommended (config file first): set these in `src/main/resources/application.yml` under `app.docker`.
 

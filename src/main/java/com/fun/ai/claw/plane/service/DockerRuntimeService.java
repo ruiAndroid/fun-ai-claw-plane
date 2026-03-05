@@ -31,6 +31,8 @@ import java.util.regex.Pattern;
 public class DockerRuntimeService {
 
     private static final Logger log = LoggerFactory.getLogger(DockerRuntimeService.class);
+    private static final String AGENTS_MD_CONTENT_PAYLOAD_KEY = "agentsMdContent";
+    private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
     private static final Pattern REQUIRE_PAIRING_PATTERN =
             Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
@@ -66,15 +68,21 @@ public class DockerRuntimeService {
 
         String image = resolveImage(payload);
         Integer gatewayHostPort = resolveGatewayHostPort(payload);
+        String agentsMdContent = resolveAgentsMdContent(payload);
+        boolean agentsMdOverwrite = resolveAgentsMdOverwrite(payload);
         return switch (action) {
-            case START -> startInstance(instanceId, image, gatewayHostPort);
+            case START -> startInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite);
             case STOP -> stopInstance(instanceId);
-            case RESTART, ROLLBACK -> restartInstance(instanceId, image, gatewayHostPort);
+            case RESTART, ROLLBACK -> restartInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite);
             case DELETE -> deleteInstance(instanceId);
         };
     }
 
-    private String startInstance(UUID instanceId, String image, Integer gatewayHostPort) {
+    private String startInstance(UUID instanceId,
+                                 String image,
+                                 Integer gatewayHostPort,
+                                 String agentsMdContent,
+                                 boolean agentsMdOverwrite) {
         String containerName = containerName(instanceId);
         boolean createdNow = false;
         if (!containerExists(containerName)) {
@@ -87,6 +95,7 @@ public class DockerRuntimeService {
 
         if (containerRunning(containerName)) {
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+            enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             return "Container already running: " + containerName;
         }
@@ -94,6 +103,7 @@ public class DockerRuntimeService {
         try {
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+            enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
             if (createdNow) {
@@ -118,7 +128,11 @@ public class DockerRuntimeService {
         return "Container stopped: " + containerName;
     }
 
-    private String restartInstance(UUID instanceId, String image, Integer gatewayHostPort) {
+    private String restartInstance(UUID instanceId,
+                                   String image,
+                                   Integer gatewayHostPort,
+                                   String agentsMdContent,
+                                   boolean agentsMdOverwrite) {
         String containerName = containerName(instanceId);
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
@@ -128,6 +142,7 @@ public class DockerRuntimeService {
             try {
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
                 enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+                enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
                 removeContainerQuietly(containerName);
@@ -138,6 +153,7 @@ public class DockerRuntimeService {
 
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
         enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+        enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
     }
@@ -727,6 +743,119 @@ public class DockerRuntimeService {
             }
         }
         throw new DockerOperationException("invalid gateway host port payload");
+    }
+
+    private String resolveAgentsMdContent(Map<String, Object> payload) {
+        if (payload == null) {
+            return null;
+        }
+        if (!payload.containsKey(AGENTS_MD_CONTENT_PAYLOAD_KEY)) {
+            return null;
+        }
+        Object raw = payload.get(AGENTS_MD_CONTENT_PAYLOAD_KEY);
+        if (raw instanceof String content) {
+            return content;
+        }
+        return null;
+    }
+
+    private boolean resolveAgentsMdOverwrite(Map<String, Object> payload) {
+        if (payload == null || !payload.containsKey(AGENTS_MD_OVERWRITE_PAYLOAD_KEY)) {
+            return true;
+        }
+        Object raw = payload.get(AGENTS_MD_OVERWRITE_PAYLOAD_KEY);
+        if (raw instanceof Boolean bool) {
+            return bool;
+        }
+        if (raw instanceof String text && StringUtils.hasText(text)) {
+            String normalized = text.trim().toLowerCase();
+            if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized) || "on".equals(normalized)) {
+                return true;
+            }
+            if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized) || "off".equals(normalized)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void enforceWorkspaceAgentsGuide(String containerName, String agentsMdContent, boolean overwrite) {
+        if (!properties.isWorkspaceAgentsAutoSyncEnabled()) {
+            return;
+        }
+        if (agentsMdContent == null) {
+            return;
+        }
+        String targetPath = properties.getWorkspaceAgentsFilePath();
+        if (!StringUtils.hasText(targetPath)) {
+            log.warn("skip AGENTS.md sync for {}: workspaceAgentsFilePath is blank", containerName);
+            return;
+        }
+        String normalizedPath = targetPath.trim();
+        if (!normalizedPath.startsWith("/")) {
+            log.warn("skip AGENTS.md sync for {}: workspaceAgentsFilePath must be absolute but was {}", containerName, normalizedPath);
+            return;
+        }
+        String parentDir = parentDirOf(normalizedPath);
+        if (!StringUtils.hasText(parentDir)) {
+            log.warn("skip AGENTS.md sync for {}: cannot derive parent dir from {}", containerName, normalizedPath);
+            return;
+        }
+        if (!overwrite && fileExistsInContainer(containerName, normalizedPath)) {
+            return;
+        }
+
+        String commandScript = "/bin/busybox mkdir -p " + shellQuote(parentDir)
+                + " && /bin/busybox dd of=" + shellQuote(normalizedPath) + " conv=fsync";
+        CommandResult write = runDockerWithInput(
+                List.of(
+                        properties.getCommand(),
+                        "exec",
+                        "-i",
+                        containerName,
+                        "/bin/busybox",
+                        "sh",
+                        "-lc",
+                        commandScript
+                ),
+                agentsMdContent.getBytes(StandardCharsets.UTF_8)
+        );
+        if (write.exitCode != 0) {
+            log.warn("failed to sync AGENTS.md for {} (path={}): {}", containerName, normalizedPath, write.output.trim());
+            return;
+        }
+        log.info("synced AGENTS.md for {} to {}", containerName, normalizedPath);
+    }
+
+    private boolean fileExistsInContainer(String containerName, String path) {
+        CommandResult result = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "test",
+                "-f",
+                path
+        ));
+        return result.exitCode == 0;
+    }
+
+    private String parentDirOf(String path) {
+        if (!StringUtils.hasText(path)) {
+            return null;
+        }
+        int slash = path.lastIndexOf('/');
+        if (slash <= 0) {
+            return null;
+        }
+        return path.substring(0, slash);
+    }
+
+    private String shellQuote(String text) {
+        if (text == null) {
+            return "''";
+        }
+        return "'" + text.replace("'", "'\"'\"'") + "'";
     }
 
     private String containerName(UUID instanceId) {

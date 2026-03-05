@@ -32,6 +32,8 @@ public class DockerRuntimeProperties {
     private String agentWorkspaceHostPathTemplate = "";
     private String agentWorkspaceContainerPathTemplate = "/workspace/agent-mgc-novel-script";
     private boolean agentWorkspaceMountReadOnly = true;
+    private boolean workspaceAgentsAutoSyncEnabled = true;
+    private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
     private String apiKey;
     private long stopTimeoutSeconds = 20;
     private long commandTimeoutSeconds = 120;
@@ -234,6 +236,22 @@ public class DockerRuntimeProperties {
 
     public void setAgentWorkspaceMountReadOnly(boolean agentWorkspaceMountReadOnly) {
         this.agentWorkspaceMountReadOnly = agentWorkspaceMountReadOnly;
+    }
+
+    public boolean isWorkspaceAgentsAutoSyncEnabled() {
+        return workspaceAgentsAutoSyncEnabled;
+    }
+
+    public void setWorkspaceAgentsAutoSyncEnabled(boolean workspaceAgentsAutoSyncEnabled) {
+        this.workspaceAgentsAutoSyncEnabled = workspaceAgentsAutoSyncEnabled;
+    }
+
+    public String getWorkspaceAgentsFilePath() {
+        return workspaceAgentsFilePath;
+    }
+
+    public void setWorkspaceAgentsFilePath(String workspaceAgentsFilePath) {
+        this.workspaceAgentsFilePath = workspaceAgentsFilePath;
     }
 
     public String getApiKey() {
