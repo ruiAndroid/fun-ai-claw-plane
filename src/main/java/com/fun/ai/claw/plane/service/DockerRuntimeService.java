@@ -31,6 +31,7 @@ import java.util.regex.Pattern;
 public class DockerRuntimeService {
 
     private static final Logger log = LoggerFactory.getLogger(DockerRuntimeService.class);
+    private static final String WORKSPACE_SKILLS_DIR = "/zeroclaw-data/workspace/skills";
     private static final String AGENTS_MD_CONTENT_PAYLOAD_KEY = "agentsMdContent";
     private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
@@ -96,6 +97,7 @@ public class DockerRuntimeService {
         if (containerRunning(containerName)) {
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
+            syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             return "Container already running: " + containerName;
         }
@@ -104,6 +106,7 @@ public class DockerRuntimeService {
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
+            syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
             if (createdNow) {
@@ -143,6 +146,7 @@ public class DockerRuntimeService {
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
                 enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
                 enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
+                syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
                 removeContainerQuietly(containerName);
@@ -154,6 +158,7 @@ public class DockerRuntimeService {
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
         enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
         enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
+        syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
     }
@@ -360,6 +365,41 @@ public class DockerRuntimeService {
             return trimmed + "skills";
         }
         return trimmed + "/skills";
+    }
+
+    private void syncWorkspaceSkills(String containerName, UUID instanceId, Integer gatewayHostPort) {
+        String sourceSkillsDir = resolveOpenSkillsDir(
+                instanceId,
+                gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
+        );
+        if (!StringUtils.hasText(sourceSkillsDir)) {
+            return;
+        }
+        String script = "SRC=" + shellQuote(sourceSkillsDir.trim())
+                + "; DST=" + shellQuote(WORKSPACE_SKILLS_DIR)
+                + "; if [ -d \"$SRC\" ]; then "
+                + "/bin/busybox mkdir -p \"$DST\""
+                + " && /bin/busybox rm -rf \"$DST\"/*"
+                + " && /bin/busybox cp -R \"$SRC\"/. \"$DST\"/; "
+                + "fi";
+        CommandResult sync = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "sh",
+                "-lc",
+                script
+        ));
+        if (sync.exitCode != 0) {
+            log.warn("failed to sync workspace skills for {} from {} to {}: {}",
+                    containerName,
+                    sourceSkillsDir,
+                    WORKSPACE_SKILLS_DIR,
+                    sync.output.trim());
+            return;
+        }
+        log.info("synced workspace skills for {} from {} to {}", containerName, sourceSkillsDir, WORKSPACE_SKILLS_DIR);
     }
 
     private void enforceRuntimeConfigPolicy(String containerName, UUID instanceId, Integer gatewayHostPort) {
