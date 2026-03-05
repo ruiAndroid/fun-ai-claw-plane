@@ -190,15 +190,6 @@ public class DockerRuntimeService {
             command.add("-e");
             command.add("API_KEY=" + properties.getApiKey().trim());
         }
-        String openSkillsDir = resolveOpenSkillsDir(instanceId, hostPort);
-        if (StringUtils.hasText(openSkillsDir)) {
-            command.add("-e");
-            command.add("ZEROCLAW_OPEN_SKILLS_ENABLED=true");
-            command.add("-e");
-            command.add("ZEROCLAW_OPEN_SKILLS_DIR=" + openSkillsDir);
-            command.add("-e");
-            command.add("ZEROCLAW_SKILLS_PROMPT_MODE=full");
-        }
         if (StringUtils.hasText(properties.getRestartPolicy())) {
             command.add("--restart");
             command.add(properties.getRestartPolicy().trim());
