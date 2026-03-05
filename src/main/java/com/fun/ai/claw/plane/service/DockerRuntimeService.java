@@ -39,6 +39,13 @@ public class DockerRuntimeService {
     private static final Pattern ALLOW_PUBLIC_BIND_PATTERN =
             Pattern.compile("(?m)^\\s*allow_public_bind\\s*=\\s*(true|false)\\s*$");
     private static final Pattern GATEWAY_SECTION_PATTERN = Pattern.compile("(?m)^\\[gateway\\]\\s*$");
+    private static final Pattern SKILLS_SECTION_PATTERN = Pattern.compile("(?m)^\\[skills\\]\\s*$");
+    private static final Pattern OPEN_SKILLS_ENABLED_PATTERN =
+            Pattern.compile("(?m)^\\s*open_skills_enabled\\s*=\\s*(true|false)\\s*$");
+    private static final Pattern OPEN_SKILLS_DIR_PATTERN =
+            Pattern.compile("(?m)^\\s*open_skills_dir\\s*=\\s*\"[^\"]*\"\\s*$");
+    private static final Pattern PROMPT_INJECTION_MODE_PATTERN =
+            Pattern.compile("(?m)^\\s*prompt_injection_mode\\s*=\\s*\"[^\"]*\"\\s*$");
     private static final Pattern SECTION_HEADER_PATTERN = Pattern.compile("(?m)^\\[[^\\]]+\\]\\s*$");
 
     private final DockerRuntimeProperties properties;
@@ -79,14 +86,14 @@ public class DockerRuntimeService {
         }
 
         if (containerRunning(containerName)) {
-            enforceGatewayPairingPolicy(containerName);
+            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             return "Container already running: " + containerName;
         }
 
         try {
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
-            enforceGatewayPairingPolicy(containerName);
+            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
             if (createdNow) {
@@ -120,7 +127,7 @@ public class DockerRuntimeService {
             createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
             try {
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
-                enforceGatewayPairingPolicy(containerName);
+                enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
                 removeContainerQuietly(containerName);
@@ -130,7 +137,7 @@ public class DockerRuntimeService {
         }
 
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
-        enforceGatewayPairingPolicy(containerName);
+        enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
     }
@@ -182,6 +189,15 @@ public class DockerRuntimeService {
         if (StringUtils.hasText(properties.getApiKey())) {
             command.add("-e");
             command.add("API_KEY=" + properties.getApiKey().trim());
+        }
+        String openSkillsDir = resolveOpenSkillsDir(instanceId, hostPort);
+        if (StringUtils.hasText(openSkillsDir)) {
+            command.add("-e");
+            command.add("ZEROCLAW_OPEN_SKILLS_ENABLED=true");
+            command.add("-e");
+            command.add("ZEROCLAW_OPEN_SKILLS_DIR=" + openSkillsDir);
+            command.add("-e");
+            command.add("ZEROCLAW_SKILLS_PROMPT_MODE=full");
         }
         if (StringUtils.hasText(properties.getRestartPolicy())) {
             command.add("--restart");
@@ -327,8 +343,26 @@ public class DockerRuntimeService {
         runDocker(List.of(properties.getCommand(), "rm", containerName));
     }
 
-    private void enforceGatewayPairingPolicy(String containerName) {
-        if (properties.isRequirePairing()) {
+    private String resolveOpenSkillsDir(UUID instanceId, int gatewayHostPort) {
+        String containerPath = resolveTemplate(properties.getAgentWorkspaceContainerPathTemplate(), instanceId, gatewayHostPort);
+        if (!StringUtils.hasText(containerPath)) {
+            return null;
+        }
+        String trimmed = containerPath.trim();
+        if (trimmed.endsWith("/")) {
+            return trimmed + "skills";
+        }
+        return trimmed + "/skills";
+    }
+
+    private void enforceRuntimeConfigPolicy(String containerName, UUID instanceId, Integer gatewayHostPort) {
+        String openSkillsDir = resolveOpenSkillsDir(
+                instanceId,
+                gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
+        );
+        boolean enforceGatewayPairing = !properties.isRequirePairing();
+        boolean enforceSkills = StringUtils.hasText(openSkillsDir);
+        if (!enforceGatewayPairing && !enforceSkills) {
             return;
         }
 
@@ -353,7 +387,7 @@ public class DockerRuntimeService {
             }
 
             String originalConfig = read.output;
-            String rewrittenConfig = rewriteGatewaySettings(originalConfig);
+            String rewrittenConfig = rewriteRuntimeSettings(originalConfig, openSkillsDir);
             if (rewrittenConfig.equals(originalConfig)) {
                 return;
             }
@@ -380,37 +414,26 @@ public class DockerRuntimeService {
                 continue;
             }
 
-            CommandResult verify = runDocker(List.of(
-                    properties.getCommand(),
-                    "exec",
-                    containerName,
-                    "/bin/busybox",
-                    "grep",
-                    "-q",
-                    "require_pairing = false",
-                    "/data/zeroclaw/config.toml"
-            ));
-            if (verify.exitCode != 0) {
-                if (attempt == 30) {
-                    log.warn("pairing enforcement verify failed for {}: {}", containerName, verify.output.trim());
-                } else {
-                    sleepSilently(1000L);
-                }
-                continue;
-            }
-
             CommandResult restart = runDocker(List.of(properties.getCommand(), "restart", containerName));
             if (restart.exitCode != 0) {
-                log.warn("container restart after pairing enforcement failed for {}: {}", containerName, restart.output.trim());
+                log.warn("container restart after runtime config enforcement failed for {}: {}", containerName, restart.output.trim());
                 return;
             }
-            log.info("enforced require_pairing=false in {}", containerName);
+            log.info("enforced runtime config policy in {}", containerName);
             return;
         }
     }
 
+    private String rewriteRuntimeSettings(String config, String openSkillsDir) {
+        String rewritten = rewriteGatewaySettings(config);
+        return rewriteSkillsSettings(rewritten, openSkillsDir);
+    }
+
     private String rewriteGatewaySettings(String config) {
         String original = config == null ? "" : config;
+        if (properties.isRequirePairing()) {
+            return original;
+        }
         String targetHost = StringUtils.hasText(properties.getGatewayHost())
                 ? properties.getGatewayHost().trim()
                 : "0.0.0.0";
@@ -453,6 +476,51 @@ public class DockerRuntimeService {
                 + targetAllowPublicBind + "\n";
     }
 
+    private String rewriteSkillsSettings(String config, String openSkillsDir) {
+        String original = config == null ? "" : config;
+        if (!StringUtils.hasText(openSkillsDir)) {
+            return original;
+        }
+        String targetOpenSkillsEnabled = "open_skills_enabled = true";
+        String targetOpenSkillsDir = "open_skills_dir = \"" + escapeTomlString(openSkillsDir.trim()) + "\"";
+        String targetPromptInjectionMode = "prompt_injection_mode = \"full\"";
+
+        if (original.isBlank()) {
+            return "[skills]\n"
+                    + targetOpenSkillsEnabled + "\n"
+                    + targetOpenSkillsDir + "\n"
+                    + targetPromptInjectionMode + "\n";
+        }
+
+        Matcher skillsMatcher = SKILLS_SECTION_PATTERN.matcher(original);
+        if (skillsMatcher.find()) {
+            int sectionStart = skillsMatcher.end();
+            int sectionEnd = original.length();
+            Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(original);
+            while (sectionHeaderMatcher.find(sectionStart)) {
+                if (sectionHeaderMatcher.start() > sectionStart) {
+                    sectionEnd = sectionHeaderMatcher.start();
+                    break;
+                }
+            }
+
+            String skillsSection = original.substring(sectionStart, sectionEnd);
+            String rewrittenSection = setUniqueSettingLine(skillsSection, OPEN_SKILLS_ENABLED_PATTERN, targetOpenSkillsEnabled);
+            rewrittenSection = setUniqueSettingLine(rewrittenSection, OPEN_SKILLS_DIR_PATTERN, targetOpenSkillsDir);
+            rewrittenSection = setUniqueSettingLine(rewrittenSection, PROMPT_INJECTION_MODE_PATTERN, targetPromptInjectionMode);
+            if (rewrittenSection.equals(skillsSection)) {
+                return original;
+            }
+            return original.substring(0, sectionStart) + rewrittenSection + original.substring(sectionEnd);
+        }
+
+        String suffix = original.endsWith("\n") ? "" : "\n";
+        return original + suffix + "[skills]\n"
+                + targetOpenSkillsEnabled + "\n"
+                + targetOpenSkillsDir + "\n"
+                + targetPromptInjectionMode + "\n";
+    }
+
     private String setUniqueSettingLine(String section, Pattern linePattern, String replacementLine) {
         String[] lines = section.split("\\R", -1);
         StringBuilder builder = new StringBuilder(section.length() + replacementLine.length() + 8);
@@ -471,6 +539,15 @@ public class DockerRuntimeService {
             normalized += "\n";
         }
         return normalized + replacementLine + "\n";
+    }
+
+    private String escapeTomlString(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
     }
 
     private void sleepSilently(long millis) {
