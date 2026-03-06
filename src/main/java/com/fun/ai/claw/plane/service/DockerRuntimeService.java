@@ -575,9 +575,9 @@ public class DockerRuntimeService {
             return original;
         }
 
-        boolean managedDelegateAgent = delegateAgentManifest != null
-                && delegateAgentId.equals(delegateAgentManifest.agentId())
-                && delegateAgentManifest.managedMode();
+        boolean managedDelegateAgent = delegateAgentManifest == null
+                || (delegateAgentId.equals(delegateAgentManifest.agentId())
+                && delegateAgentManifest.managedMode());
         String targetTemperatureLine = StringUtils.hasText(resolvedTemperature)
                 ? "temperature = " + resolvedTemperature.trim()
                 : null;
