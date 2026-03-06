@@ -39,7 +39,7 @@ app:
     require-pairing: ${DOCKER_REQUIRE_PAIRING:false}
     gateway-require-pairing-option: --require-pairing
     allow-public-bind: ${DOCKER_ALLOW_PUBLIC_BIND:true}
-    gateway-ready-timeout-seconds: ${DOCKER_GATEWAY_READY_TIMEOUT_SECONDS:120}
+    gateway-ready-timeout-seconds: ${DOCKER_GATEWAY_READY_TIMEOUT_SECONDS:30}
     gateway-ready-probe-interval-millis: ${DOCKER_GATEWAY_READY_PROBE_INTERVAL_MILLIS:500}
     gateway-ready-host: ${DOCKER_GATEWAY_READY_HOST:127.0.0.1}
     gateway-ready-path: ${DOCKER_GATEWAY_READY_PATH:/health}
@@ -51,7 +51,7 @@ app:
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
     runtime-config-policy-enabled: ${DOCKER_RUNTIME_CONFIG_POLICY_ENABLED:false}
     runtime-config-gateway-section-enabled: ${DOCKER_RUNTIME_CONFIG_GATEWAY_SECTION_ENABLED:true}
-    runtime-config-skills-section-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_SECTION_ENABLED:true}
+    runtime-config-skills-section-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_SECTION_ENABLED:false}
     runtime-config-delegate-agent-section-enabled: ${DOCKER_RUNTIME_CONFIG_DELEGATE_AGENT_SECTION_ENABLED:true}
     runtime-config-model-route-section-enabled: ${DOCKER_RUNTIME_CONFIG_MODEL_ROUTE_SECTION_ENABLED:true}
     runtime-config-query-classification-rule-section-enabled: ${DOCKER_RUNTIME_CONFIG_QUERY_CLASSIFICATION_RULE_SECTION_ENABLED:true}
