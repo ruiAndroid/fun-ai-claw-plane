@@ -35,7 +35,6 @@ import java.util.regex.Pattern;
 public class DockerRuntimeService {
 
     private static final Logger log = LoggerFactory.getLogger(DockerRuntimeService.class);
-    private static final String WORKSPACE_SKILLS_DIR = "/zeroclaw-data/workspace/skills";
     private static final String AGENTS_MD_CONTENT_PAYLOAD_KEY = "agentsMdContent";
     private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
@@ -46,16 +45,9 @@ public class DockerRuntimeService {
     private static final Pattern ALLOW_PUBLIC_BIND_PATTERN =
             Pattern.compile("(?m)^\\s*allow_public_bind\\s*=\\s*(true|false)\\s*$");
     private static final Pattern GATEWAY_SECTION_PATTERN = Pattern.compile("(?m)^\\[gateway\\]\\s*$");
-    private static final Pattern SKILLS_SECTION_PATTERN = Pattern.compile("(?m)^\\[skills\\]\\s*$");
     private static final Pattern MODEL_ROUTE_SECTION_PATTERN = Pattern.compile("(?m)^\\[\\[model_routes\\]\\]\\s*$");
     private static final Pattern QUERY_CLASSIFICATION_RULE_SECTION_PATTERN =
             Pattern.compile("(?m)^\\[\\[query_classification\\.rules\\]\\]\\s*$");
-    private static final Pattern OPEN_SKILLS_ENABLED_PATTERN =
-            Pattern.compile("(?m)^\\s*open_skills_enabled\\s*=\\s*(true|false)\\s*$");
-    private static final Pattern OPEN_SKILLS_DIR_PATTERN =
-            Pattern.compile("(?m)^\\s*open_skills_dir\\s*=\\s*\"[^\"]*\"\\s*$");
-    private static final Pattern PROMPT_INJECTION_MODE_PATTERN =
-            Pattern.compile("(?m)^\\s*prompt_injection_mode\\s*=\\s*\"[^\"]*\"\\s*$");
     private static final Pattern SECTION_HEADER_PATTERN =
             Pattern.compile("(?m)^(?:\\[[^\\[\\]\\r\\n]+\\]|\\[\\[[^\\[\\]\\r\\n]+\\]\\])\\s*$");
     private static final Pattern BROKEN_SECTION_HEADER_WITH_SETTING_PATTERN =
@@ -157,7 +149,6 @@ public class DockerRuntimeService {
 
         if (containerRunning(containerName)) {
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-            syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             return "Container already running: " + containerName;
@@ -166,7 +157,6 @@ public class DockerRuntimeService {
         try {
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-            syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
@@ -206,7 +196,6 @@ public class DockerRuntimeService {
             try {
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
                 enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-                syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
                 enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
@@ -218,7 +207,6 @@ public class DockerRuntimeService {
 
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
         enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-        syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
         enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
@@ -416,69 +404,14 @@ public class DockerRuntimeService {
         runDocker(List.of(properties.getCommand(), "rm", containerName));
     }
 
-    private String resolveOpenSkillsDir(UUID instanceId, int gatewayHostPort) {
-        String containerPath = resolveTemplate(properties.getAgentWorkspaceContainerPathTemplate(), instanceId, gatewayHostPort);
-        if (!StringUtils.hasText(containerPath)) {
-            return null;
-        }
-        String trimmed = containerPath.trim();
-        if (trimmed.endsWith("/")) {
-            return trimmed + "skills";
-        }
-        return trimmed + "/skills";
-    }
-
-    private void syncWorkspaceSkills(String containerName, UUID instanceId, Integer gatewayHostPort) {
-        String sourceSkillsDir = resolveOpenSkillsDir(
-                instanceId,
-                gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
-        );
-        if (!StringUtils.hasText(sourceSkillsDir)) {
-            return;
-        }
-        String script = "SRC=" + shellQuote(sourceSkillsDir.trim())
-                + "; DST=" + shellQuote(WORKSPACE_SKILLS_DIR)
-                + "; if [ -d \"$SRC\" ]; then "
-                + "/bin/busybox mkdir -p \"$DST\""
-                + " && /bin/busybox rm -rf \"$DST\"/*"
-                + " && /bin/busybox cp -R \"$SRC\"/. \"$DST\"/; "
-                + "fi";
-        CommandResult sync = runDocker(List.of(
-                properties.getCommand(),
-                "exec",
-                containerName,
-                "/bin/busybox",
-                "sh",
-                "-lc",
-                script
-        ));
-        if (sync.exitCode != 0) {
-            log.warn("failed to sync workspace skills for {} from {} to {}: {}",
-                    containerName,
-                    sourceSkillsDir,
-                    WORKSPACE_SKILLS_DIR,
-                    sync.output.trim());
-            return;
-        }
-        log.info("synced workspace skills for {} from {} to {}", containerName, sourceSkillsDir, WORKSPACE_SKILLS_DIR);
-    }
-
     private void enforceRuntimeConfigPolicy(String containerName, UUID instanceId, Integer gatewayHostPort) {
-        String sourceSkillsDir = resolveOpenSkillsDir(
-                instanceId,
-                gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
-        );
         boolean enforceGatewaySection = properties.isGatewayRuntimeConfigPatchEnabled() && !properties.isRequirePairing();
-        boolean enforceSkillsSection = properties.isSkillsOpenRuntimeConfigPatchEnabled()
-                || properties.isSkillsPromptInjectionRuntimeConfigPatchEnabled()
-                || (properties.isSkillsDirRuntimeConfigPatchEnabled() && StringUtils.hasText(sourceSkillsDir));
         boolean enforceDelegateAgentSection =
                 properties.isDelegateAgentRuntimeConfigPatchEnabled() && properties.isDelegateAgentProfileEnabled();
         boolean enforceModelRouteSection = properties.isModelRouteRuntimeConfigPatchEnabled();
         boolean enforceQueryClassificationRuleSection = properties.isQueryClassificationRuleRuntimeConfigPatchEnabled();
         if (!properties.isAnyRuntimeConfigPatchEnabled()
                 || (!enforceGatewaySection
-                && !enforceSkillsSection
                 && !enforceDelegateAgentSection
                 && !enforceModelRouteSection
                 && !enforceQueryClassificationRuleSection)) {
@@ -513,7 +446,7 @@ public class DockerRuntimeService {
                     gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
             )
                     : null;
-            String rewrittenConfig = rewriteRuntimeSettings(originalConfig, sourceSkillsDir, delegateAgentManifest);
+            String rewrittenConfig = rewriteRuntimeSettings(originalConfig, delegateAgentManifest);
             if (rewrittenConfig.equals(originalConfig)) {
                 return;
             }
@@ -545,12 +478,9 @@ public class DockerRuntimeService {
         }
     }
 
-    private String rewriteRuntimeSettings(String config,
-                                          String sourceSkillsDir,
-                                          DelegateAgentManifestSpec delegateAgentManifest) {
+    private String rewriteRuntimeSettings(String config, DelegateAgentManifestSpec delegateAgentManifest) {
         String rewritten = sanitizeBrokenSectionHeaders(config);
         rewritten = rewriteGatewaySettings(rewritten);
-        rewritten = rewriteSkillsSettings(rewritten, sourceSkillsDir);
         DelegateAgentProfileSpec delegateAgentProfile = resolveDelegateAgentProfileSpec(rewritten);
         rewritten = rewriteModelRouteSettings(rewritten, delegateAgentProfile);
         rewritten = rewriteQueryClassificationRuleSettings(rewritten, delegateAgentProfile);
@@ -582,31 +512,6 @@ public class DockerRuntimeService {
                 )
         );
         return mergeNamedSection(original, GATEWAY_SECTION_PATTERN, fragment);
-    }
-
-    private String rewriteSkillsSettings(String config, String sourceSkillsDir) {
-        String original = config == null ? "" : config;
-        boolean patchOpenSkillsEnabled = properties.isSkillsOpenRuntimeConfigPatchEnabled();
-        boolean patchOpenSkillsDir = properties.isSkillsDirRuntimeConfigPatchEnabled() && StringUtils.hasText(sourceSkillsDir);
-        boolean patchPromptInjectionMode = properties.isSkillsPromptInjectionRuntimeConfigPatchEnabled();
-        if (!patchOpenSkillsEnabled && !patchOpenSkillsDir && !patchPromptInjectionMode) {
-            return original;
-        }
-        String configuredRuntimeOpenSkillsDir = StringUtils.hasText(properties.getRuntimeConfigSkillsOpenDirPath())
-                ? properties.getRuntimeConfigSkillsOpenDirPath().trim()
-                : WORKSPACE_SKILLS_DIR;
-        String runtimeOpenSkillsDir = patchOpenSkillsDir ? configuredRuntimeOpenSkillsDir : null;
-        RenderedSection fragment = loadRenderedSection(
-                properties.getSkillsSectionFragmentPath(),
-                Map.of(
-                        "openSkillsEnabledLine", patchOpenSkillsEnabled ? "open_skills_enabled = true" : "",
-                        "openSkillsDirLine", StringUtils.hasText(runtimeOpenSkillsDir)
-                                ? "open_skills_dir = \"" + escapeTomlString(runtimeOpenSkillsDir) + "\""
-                                : "",
-                        "promptInjectionModeLine", patchPromptInjectionMode ? "prompt_injection_mode = \"compact\"" : ""
-                )
-        );
-        return mergeNamedSection(original, SKILLS_SECTION_PATTERN, fragment);
     }
 
     private DelegateAgentProfileSpec resolveDelegateAgentProfileSpec(String config) {
