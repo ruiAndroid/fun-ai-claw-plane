@@ -17,6 +17,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -801,19 +803,27 @@ public class DockerRuntimeService {
     }
 
     private CommandResult writeConfigToContainer(String containerName, String configText) {
-        return runDockerWithInput(
-                List.of(
-                        properties.getCommand(),
-                        "exec",
-                        "-i",
-                        containerName,
-                        "/bin/busybox",
-                        "dd",
-                        "of=/data/zeroclaw/config.toml",
-                        "conv=fsync"
-                ),
-                configText.getBytes(StandardCharsets.UTF_8)
-        );
+        Path tempFile = null;
+        try {
+            tempFile = Files.createTempFile("fun-ai-claw-config-", ".toml");
+            Files.writeString(tempFile, configText == null ? "" : configText, StandardCharsets.UTF_8);
+            return runDocker(List.of(
+                    properties.getCommand(),
+                    "cp",
+                    tempFile.toString(),
+                    containerName + ":/data/zeroclaw/config.toml"
+            ));
+        } catch (IOException ex) {
+            return new CommandResult(1, "io error: " + ex.getMessage());
+        } finally {
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException ignored) {
+                    // Best effort cleanup only.
+                }
+            }
+        }
     }
 
     private void restoreOriginalConfig(String containerName, String originalConfig, String reason) {
@@ -1343,6 +1353,10 @@ public class DockerRuntimeService {
             sleepSilently(intervalMillis);
         }
 
+        String logsTail = readContainerLogsTail(containerName, 40);
+        String logSuffix = StringUtils.hasText(logsTail)
+                ? " logs: " + logsTail
+                : "";
         throw new DockerOperationException(
                 "gateway readiness check timed out after "
                         + timeoutSeconds
@@ -1353,7 +1367,28 @@ public class DockerRuntimeService {
                         + " (last error: "
                         + lastError
                         + ")"
+                        + logSuffix
         );
+    }
+
+    private String readContainerLogsTail(String containerName, int tailLines) {
+        int safeTailLines = tailLines > 0 ? tailLines : 40;
+        try {
+            CommandResult result = runDocker(List.of(
+                    properties.getCommand(),
+                    "logs",
+                    "--tail",
+                    String.valueOf(safeTailLines),
+                    containerName
+            ));
+            if (result.exitCode != 0 || !StringUtils.hasText(result.output)) {
+                return null;
+            }
+            return result.output.replace("\r", " ").replace("\n", " | ").trim();
+        } catch (DockerOperationException ex) {
+            log.warn("failed to read container logs for {}: {}", containerName, ex.getMessage());
+            return null;
+        }
     }
 
     private CommandResult runDocker(List<String> command) {
