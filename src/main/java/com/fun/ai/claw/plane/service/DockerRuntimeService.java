@@ -1,7 +1,5 @@
 package com.fun.ai.claw.plane.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fun.ai.claw.plane.config.DockerRuntimeProperties;
 import com.fun.ai.claw.plane.model.CommandAction;
 import org.slf4j.Logger;
@@ -67,11 +65,22 @@ public class DockerRuntimeService {
             Pattern.compile("(?m)^\\s*temperature\\s*=\\s*([-+]?[0-9]+(?:\\.[0-9]+)?)\\s*$");
     private static final Pattern DELEGATE_ALLOWED_TOOLS_PATTERN =
             Pattern.compile("(?ms)^\\s*allowed_tools\\s*=\\s*\\[(.*?)]\\s*$");
+    private static final Pattern MANIFEST_AGENT_ID_PATTERN =
+            Pattern.compile("\"agent_id\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern MANIFEST_AGENT_ID_CAMEL_PATTERN =
+            Pattern.compile("\"agentId\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern MANIFEST_ENTRY_SKILL_PATTERN =
+            Pattern.compile("\"entry_skill\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern MANIFEST_ENTRY_SKILL_CAMEL_PATTERN =
+            Pattern.compile("\"entrySkill\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern MANIFEST_SKILLS_ARRAY_PATTERN =
+            Pattern.compile("(?s)\"skills\"\\s*:\\s*\\[(.*?)]");
+    private static final Pattern JSON_QUOTED_STRING_PATTERN =
+            Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final DockerRuntimeProperties properties;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
     private final HttpClient healthProbeClient;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public DockerRuntimeService(DockerRuntimeProperties properties) {
         this.properties = properties;
@@ -776,45 +785,36 @@ public class DockerRuntimeService {
             return null;
         }
 
-        try {
-            JsonNode root = objectMapper.readTree(read.output());
-            String manifestAgentId = firstNonBlank(
-                    jsonText(root, "agent_id"),
-                    jsonText(root, "agentId")
-            );
-            if (StringUtils.hasText(manifestAgentId) && !delegateAgentId.equals(manifestAgentId.trim())) {
-                log.warn("skip delegate agent allowlist sync for {}: manifest agent_id={} does not match",
-                        delegateAgentId,
-                        manifestAgentId.trim());
-                return null;
-            }
-            LinkedHashSet<String> allowedTools = new LinkedHashSet<>();
-            addIfHasText(allowedTools, firstNonBlank(
-                    jsonText(root, "entry_skill"),
-                    jsonText(root, "entrySkill")
-            ));
-            JsonNode skillsNode = root.path("skills");
-            if (skillsNode.isArray()) {
-                for (JsonNode item : skillsNode) {
-                    if (item != null && item.isTextual()) {
-                        addIfHasText(allowedTools, item.asText());
-                    }
-                }
-            }
-            if (allowedTools.isEmpty()) {
-                log.warn("skip delegate agent allowlist sync for {}: manifest {} contains no skills",
-                        delegateAgentId,
-                        manifestPath);
-                return null;
-            }
-            return new DelegateAgentManifestSpec(delegateAgentId, List.copyOf(allowedTools), manifestPath);
-        } catch (IOException ex) {
-            log.warn("skip delegate agent allowlist sync for {}: failed to parse manifest {} ({})",
+        String manifestText = read.output;
+        String manifestAgentId = firstNonBlank(
+                findJsonStringValue(MANIFEST_AGENT_ID_PATTERN, manifestText),
+                findJsonStringValue(MANIFEST_AGENT_ID_CAMEL_PATTERN, manifestText)
+        );
+        if (StringUtils.hasText(manifestAgentId) && !delegateAgentId.equals(manifestAgentId.trim())) {
+            log.warn("skip delegate agent allowlist sync for {}: manifest agent_id={} does not match",
                     delegateAgentId,
-                    manifestPath,
-                    ex.getMessage());
+                    manifestAgentId.trim());
             return null;
         }
+        LinkedHashSet<String> allowedTools = new LinkedHashSet<>();
+        addIfHasText(allowedTools, firstNonBlank(
+                findJsonStringValue(MANIFEST_ENTRY_SKILL_PATTERN, manifestText),
+                findJsonStringValue(MANIFEST_ENTRY_SKILL_CAMEL_PATTERN, manifestText)
+        ));
+        String skillsArrayBody = findDelimitedValue(MANIFEST_SKILLS_ARRAY_PATTERN, manifestText);
+        if (StringUtils.hasText(skillsArrayBody)) {
+            Matcher matcher = JSON_QUOTED_STRING_PATTERN.matcher(skillsArrayBody);
+            while (matcher.find()) {
+                addIfHasText(allowedTools, unescapeJsonString(matcher.group(1)));
+            }
+        }
+        if (allowedTools.isEmpty()) {
+            log.warn("skip delegate agent allowlist sync for {}: manifest {} contains no skills",
+                    delegateAgentId,
+                    manifestPath);
+            return null;
+        }
+        return new DelegateAgentManifestSpec(delegateAgentId, List.copyOf(allowedTools), manifestPath);
     }
 
     private SectionMatch findDelegateAgentSection(String config, String delegateAgentId) {
@@ -886,18 +886,6 @@ public class DockerRuntimeService {
                 : normalizedBase + "/" + normalizedRelative;
     }
 
-    private String jsonText(JsonNode node, String fieldName) {
-        if (node == null || !StringUtils.hasText(fieldName)) {
-            return null;
-        }
-        JsonNode value = node.path(fieldName);
-        if (!value.isTextual()) {
-            return null;
-        }
-        String text = value.asText();
-        return StringUtils.hasText(text) ? text.trim() : null;
-    }
-
     private void addIfHasText(Set<String> values, String candidate) {
         if (values == null || !StringUtils.hasText(candidate)) {
             return;
@@ -939,6 +927,66 @@ public class DockerRuntimeService {
         }
         String value = matcher.group(1);
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String findJsonStringValue(Pattern pattern, String text) {
+        String value = findDelimitedValue(pattern, text);
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return unescapeJsonString(value);
+    }
+
+    private String findDelimitedValue(Pattern pattern, String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        Matcher matcher = pattern.matcher(text);
+        if (!matcher.find() || matcher.groupCount() < 1) {
+            return null;
+        }
+        String value = matcher.group(1);
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String unescapeJsonString(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder builder = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (current != '\\' || i == value.length() - 1) {
+                builder.append(current);
+                continue;
+            }
+            char next = value.charAt(++i);
+            switch (next) {
+                case '"', '\\', '/' -> builder.append(next);
+                case 'b' -> builder.append('\b');
+                case 'f' -> builder.append('\f');
+                case 'n' -> builder.append('\n');
+                case 'r' -> builder.append('\r');
+                case 't' -> builder.append('\t');
+                case 'u' -> {
+                    if (i + 4 >= value.length()) {
+                        builder.append("\\u");
+                        continue;
+                    }
+                    String hex = value.substring(i + 1, i + 5);
+                    try {
+                        builder.append((char) Integer.parseInt(hex, 16));
+                        i += 4;
+                    } catch (NumberFormatException ex) {
+                        builder.append("\\u").append(hex);
+                        i += 4;
+                    }
+                }
+                default -> builder.append(next);
+            }
+        }
+        String normalized = builder.toString().trim();
+        return StringUtils.hasText(normalized) ? normalized : null;
     }
 
     private String firstNonBlank(String... values) {
