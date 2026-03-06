@@ -1,0 +1,5 @@
+[[model_routes]]
+hint = "{{delegateAgentId}}"
+provider = "{{delegateProvider}}"
+model = "{{delegateModel}}"
+{{delegateTemperatureLine}}

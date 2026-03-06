@@ -4,3 +4,4 @@ model = "{{delegateModel}}"
 {{delegateTemperatureLine}}
 {{delegateAgenticLine}}
 {{delegateAllowedToolsBlock}}
+{{delegateMaxIterationsLine}}
