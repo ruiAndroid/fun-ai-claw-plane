@@ -240,6 +240,7 @@ public class DockerRuntimeService {
         if (hostPort <= 0 || hostPort > 65535) {
             throw new DockerOperationException("invalid gateway host port: " + hostPort);
         }
+        String gatewayConfigDir = resolveTemplate(properties.getGatewayConfigDirTemplate(), instanceId, hostPort);
 
         List<String> command = new ArrayList<>();
         command.add(properties.getCommand());
@@ -256,6 +257,12 @@ public class DockerRuntimeService {
         command.add("ZEROCLAW_ALLOW_PUBLIC_BIND=" + properties.isAllowPublicBind());
         command.add("-e");
         command.add("ZEROCLAW_REQUIRE_PAIRING=" + properties.isRequirePairing());
+        if (StringUtils.hasText(gatewayConfigDir)) {
+            command.add("-e");
+            command.add("ZEROCLAW_CONFIG_DIR=" + gatewayConfigDir.trim());
+            command.add("-w");
+            command.add(gatewayConfigDir.trim());
+        }
         if (StringUtils.hasText(properties.getApiKey())) {
             command.add("-e");
             command.add("API_KEY=" + properties.getApiKey().trim());
@@ -273,7 +280,7 @@ public class DockerRuntimeService {
         command.add(String.valueOf(properties.getGatewayContainerPort()));
         Set<String> supportedOptions = detectGatewayOptions(image);
         appendGatewaySecurityArgs(command, supportedOptions);
-        appendGatewayPathRoutingArgs(command, supportedOptions, instanceId, hostPort);
+        appendGatewayPathRoutingArgs(command, supportedOptions, instanceId, hostPort, gatewayConfigDir);
         runDockerChecked(command, "failed to create container");
     }
 
@@ -306,7 +313,8 @@ public class DockerRuntimeService {
     private void appendGatewayPathRoutingArgs(List<String> command,
                                               Set<String> supportedOptions,
                                               UUID instanceId,
-                                              int gatewayHostPort) {
+                                              int gatewayHostPort,
+                                              String gatewayConfigDir) {
         if (!properties.isUiPathRoutingEnabled()) {
             return;
         }
@@ -326,7 +334,7 @@ public class DockerRuntimeService {
                 command,
                 supportedOptions,
                 properties.getGatewayConfigDirOption(),
-                resolveTemplate(properties.getGatewayConfigDirTemplate(), instanceId, gatewayHostPort)
+                gatewayConfigDir
         );
     }
 
