@@ -37,6 +37,10 @@ public class DockerRuntimeProperties {
     private boolean runtimeConfigPolicyEnabled = false;
     private boolean runtimeConfigGatewaySectionEnabled = false;
     private boolean runtimeConfigSkillsSectionEnabled = false;
+    private boolean runtimeConfigSkillsOpenEnabled = false;
+    private boolean runtimeConfigSkillsDirEnabled = false;
+    private boolean runtimeConfigSkillsPromptInjectionModeEnabled = false;
+    private String runtimeConfigSkillsOpenDirPath = "/zeroclaw-data/workspace/skills";
     private boolean runtimeConfigDelegateAgentSectionEnabled = false;
     private boolean runtimeConfigModelRouteSectionEnabled = false;
     private boolean runtimeConfigQueryClassificationRuleSectionEnabled = false;
@@ -297,6 +301,38 @@ public class DockerRuntimeProperties {
         this.runtimeConfigSkillsSectionEnabled = runtimeConfigSkillsSectionEnabled;
     }
 
+    public boolean isRuntimeConfigSkillsOpenEnabled() {
+        return runtimeConfigSkillsOpenEnabled;
+    }
+
+    public void setRuntimeConfigSkillsOpenEnabled(boolean runtimeConfigSkillsOpenEnabled) {
+        this.runtimeConfigSkillsOpenEnabled = runtimeConfigSkillsOpenEnabled;
+    }
+
+    public boolean isRuntimeConfigSkillsDirEnabled() {
+        return runtimeConfigSkillsDirEnabled;
+    }
+
+    public void setRuntimeConfigSkillsDirEnabled(boolean runtimeConfigSkillsDirEnabled) {
+        this.runtimeConfigSkillsDirEnabled = runtimeConfigSkillsDirEnabled;
+    }
+
+    public boolean isRuntimeConfigSkillsPromptInjectionModeEnabled() {
+        return runtimeConfigSkillsPromptInjectionModeEnabled;
+    }
+
+    public void setRuntimeConfigSkillsPromptInjectionModeEnabled(boolean runtimeConfigSkillsPromptInjectionModeEnabled) {
+        this.runtimeConfigSkillsPromptInjectionModeEnabled = runtimeConfigSkillsPromptInjectionModeEnabled;
+    }
+
+    public String getRuntimeConfigSkillsOpenDirPath() {
+        return runtimeConfigSkillsOpenDirPath;
+    }
+
+    public void setRuntimeConfigSkillsOpenDirPath(String runtimeConfigSkillsOpenDirPath) {
+        this.runtimeConfigSkillsOpenDirPath = runtimeConfigSkillsOpenDirPath;
+    }
+
     public boolean isRuntimeConfigDelegateAgentSectionEnabled() {
         return runtimeConfigDelegateAgentSectionEnabled;
     }
@@ -327,7 +363,25 @@ public class DockerRuntimeProperties {
     }
 
     public boolean isSkillsRuntimeConfigPatchEnabled() {
-        return runtimeConfigPolicyEnabled || runtimeConfigSkillsSectionEnabled;
+        return runtimeConfigPolicyEnabled
+                || runtimeConfigSkillsSectionEnabled
+                || runtimeConfigSkillsOpenEnabled
+                || runtimeConfigSkillsDirEnabled
+                || runtimeConfigSkillsPromptInjectionModeEnabled;
+    }
+
+    public boolean isSkillsOpenRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled || runtimeConfigSkillsSectionEnabled || runtimeConfigSkillsOpenEnabled;
+    }
+
+    public boolean isSkillsDirRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled || runtimeConfigSkillsSectionEnabled || runtimeConfigSkillsDirEnabled;
+    }
+
+    public boolean isSkillsPromptInjectionRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled
+                || runtimeConfigSkillsSectionEnabled
+                || runtimeConfigSkillsPromptInjectionModeEnabled;
     }
 
     public boolean isDelegateAgentRuntimeConfigPatchEnabled() {

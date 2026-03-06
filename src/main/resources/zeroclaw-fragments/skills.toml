@@ -1,4 +1,4 @@
 [skills]
-open_skills_enabled = true
-open_skills_dir = "{{openSkillsDir}}"
-prompt_injection_mode = "compact"
+{{openSkillsEnabledLine}}
+{{openSkillsDirLine}}
+{{promptInjectionModeLine}}

@@ -156,18 +156,18 @@ public class DockerRuntimeService {
         }
 
         if (containerRunning(containerName)) {
-            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
             syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
+            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             return "Container already running: " + containerName;
         }
 
         try {
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
-            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
             syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
+            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
             if (createdNow) {
@@ -205,9 +205,9 @@ public class DockerRuntimeService {
             createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
             try {
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
-                enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
                 enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
                 syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
+                enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
                 removeContainerQuietly(containerName);
@@ -217,9 +217,9 @@ public class DockerRuntimeService {
         }
 
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
-        enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
         enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
         syncWorkspaceSkills(containerName, instanceId, gatewayHostPort);
+        enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
     }
@@ -464,12 +464,14 @@ public class DockerRuntimeService {
     }
 
     private void enforceRuntimeConfigPolicy(String containerName, UUID instanceId, Integer gatewayHostPort) {
-        String openSkillsDir = resolveOpenSkillsDir(
+        String sourceSkillsDir = resolveOpenSkillsDir(
                 instanceId,
                 gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
         );
         boolean enforceGatewaySection = properties.isGatewayRuntimeConfigPatchEnabled() && !properties.isRequirePairing();
-        boolean enforceSkillsSection = properties.isSkillsRuntimeConfigPatchEnabled() && StringUtils.hasText(openSkillsDir);
+        boolean enforceSkillsSection = properties.isSkillsOpenRuntimeConfigPatchEnabled()
+                || properties.isSkillsPromptInjectionRuntimeConfigPatchEnabled()
+                || (properties.isSkillsDirRuntimeConfigPatchEnabled() && StringUtils.hasText(sourceSkillsDir));
         boolean enforceDelegateAgentSection =
                 properties.isDelegateAgentRuntimeConfigPatchEnabled() && properties.isDelegateAgentProfileEnabled();
         boolean enforceModelRouteSection = properties.isModelRouteRuntimeConfigPatchEnabled();
@@ -511,7 +513,7 @@ public class DockerRuntimeService {
                     gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
             )
                     : null;
-            String rewrittenConfig = rewriteRuntimeSettings(originalConfig, openSkillsDir, delegateAgentManifest);
+            String rewrittenConfig = rewriteRuntimeSettings(originalConfig, sourceSkillsDir, delegateAgentManifest);
             if (rewrittenConfig.equals(originalConfig)) {
                 return;
             }
@@ -544,11 +546,11 @@ public class DockerRuntimeService {
     }
 
     private String rewriteRuntimeSettings(String config,
-                                          String openSkillsDir,
+                                          String sourceSkillsDir,
                                           DelegateAgentManifestSpec delegateAgentManifest) {
         String rewritten = sanitizeBrokenSectionHeaders(config);
         rewritten = rewriteGatewaySettings(rewritten);
-        rewritten = rewriteSkillsSettings(rewritten, openSkillsDir);
+        rewritten = rewriteSkillsSettings(rewritten, sourceSkillsDir);
         DelegateAgentProfileSpec delegateAgentProfile = resolveDelegateAgentProfileSpec(rewritten);
         rewritten = rewriteModelRouteSettings(rewritten, delegateAgentProfile);
         rewritten = rewriteQueryClassificationRuleSettings(rewritten, delegateAgentProfile);
@@ -582,14 +584,27 @@ public class DockerRuntimeService {
         return mergeNamedSection(original, GATEWAY_SECTION_PATTERN, fragment);
     }
 
-    private String rewriteSkillsSettings(String config, String openSkillsDir) {
+    private String rewriteSkillsSettings(String config, String sourceSkillsDir) {
         String original = config == null ? "" : config;
-        if (!properties.isSkillsRuntimeConfigPatchEnabled() || !StringUtils.hasText(openSkillsDir)) {
+        boolean patchOpenSkillsEnabled = properties.isSkillsOpenRuntimeConfigPatchEnabled();
+        boolean patchOpenSkillsDir = properties.isSkillsDirRuntimeConfigPatchEnabled() && StringUtils.hasText(sourceSkillsDir);
+        boolean patchPromptInjectionMode = properties.isSkillsPromptInjectionRuntimeConfigPatchEnabled();
+        if (!patchOpenSkillsEnabled && !patchOpenSkillsDir && !patchPromptInjectionMode) {
             return original;
         }
+        String configuredRuntimeOpenSkillsDir = StringUtils.hasText(properties.getRuntimeConfigSkillsOpenDirPath())
+                ? properties.getRuntimeConfigSkillsOpenDirPath().trim()
+                : WORKSPACE_SKILLS_DIR;
+        String runtimeOpenSkillsDir = patchOpenSkillsDir ? configuredRuntimeOpenSkillsDir : null;
         RenderedSection fragment = loadRenderedSection(
                 properties.getSkillsSectionFragmentPath(),
-                Map.of("openSkillsDir", escapeTomlString(openSkillsDir.trim()))
+                Map.of(
+                        "openSkillsEnabledLine", patchOpenSkillsEnabled ? "open_skills_enabled = true" : "",
+                        "openSkillsDirLine", StringUtils.hasText(runtimeOpenSkillsDir)
+                                ? "open_skills_dir = \"" + escapeTomlString(runtimeOpenSkillsDir) + "\""
+                                : "",
+                        "promptInjectionModeLine", patchPromptInjectionMode ? "prompt_injection_mode = \"compact\"" : ""
+                )
         );
         return mergeNamedSection(original, SKILLS_SECTION_PATTERN, fragment);
     }
