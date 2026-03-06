@@ -899,6 +899,17 @@ public class DockerRuntimeService {
             return null;
         }
         int bodyStart = sectionMatcher.end();
+        if (bodyStart < config.length()) {
+            char next = config.charAt(bodyStart);
+            if (next == '\r') {
+                bodyStart++;
+                if (bodyStart < config.length() && config.charAt(bodyStart) == '\n') {
+                    bodyStart++;
+                }
+            } else if (next == '\n') {
+                bodyStart++;
+            }
+        }
         int bodyEnd = config.length();
         Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(config);
         while (sectionHeaderMatcher.find(bodyStart)) {
