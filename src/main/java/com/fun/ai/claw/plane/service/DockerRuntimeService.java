@@ -20,7 +20,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -71,15 +70,14 @@ public class DockerRuntimeService {
             Pattern.compile("\"agent_id\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern MANIFEST_AGENT_ID_CAMEL_PATTERN =
             Pattern.compile("\"agentId\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final Pattern MANIFEST_MODE_PATTERN =
+            Pattern.compile("\"mode\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern MANIFEST_ENTRY_SKILL_PATTERN =
             Pattern.compile("\"entry_skill\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern MANIFEST_ENTRY_SKILL_CAMEL_PATTERN =
             Pattern.compile("\"entrySkill\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern MANIFEST_SKILLS_ARRAY_PATTERN =
             Pattern.compile("(?s)\"skills\"\\s*:\\s*\\[(.*?)]");
-    private static final Pattern JSON_QUOTED_STRING_PATTERN =
-            Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
-
     private final DockerRuntimeProperties properties;
     private final ResourceLoader resourceLoader;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
@@ -440,7 +438,8 @@ public class DockerRuntimeService {
         );
         boolean enforceGatewayPairing = !properties.isRequirePairing();
         boolean enforceSkills = StringUtils.hasText(openSkillsDir);
-        if (!enforceGatewayPairing && !enforceSkills) {
+        boolean enforceDelegateAgentProfile = properties.isDelegateAgentProfileEnabled();
+        if (!enforceGatewayPairing && !enforceSkills && !enforceDelegateAgentProfile) {
             return;
         }
 
@@ -576,16 +575,12 @@ public class DockerRuntimeService {
             return original;
         }
 
-        List<String> manifestAllowedTools = delegateAgentManifest != null
+        boolean managedDelegateAgent = delegateAgentManifest != null
                 && delegateAgentId.equals(delegateAgentManifest.agentId())
-                ? delegateAgentManifest.allowedTools()
-                : List.of();
+                && delegateAgentManifest.managedMode();
         String targetTemperatureLine = StringUtils.hasText(resolvedTemperature)
                 ? "temperature = " + resolvedTemperature.trim()
                 : null;
-        String targetAllowedToolsBlock = manifestAllowedTools.isEmpty()
-                ? null
-                : buildTomlStringArrayBlock("allowed_tools", manifestAllowedTools);
         RenderedSection fragment = loadRenderedSection(
                 properties.getDelegateAgentSectionFragmentPath(),
                 Map.of(
@@ -593,8 +588,8 @@ public class DockerRuntimeService {
                         "delegateProvider", escapeTomlString(resolvedProvider.trim()),
                         "delegateModel", escapeTomlString(resolvedModel.trim()),
                         "delegateTemperatureLine", targetTemperatureLine == null ? "" : targetTemperatureLine,
-                        "delegateAgenticLine", targetAllowedToolsBlock == null ? "" : "agentic = true",
-                        "delegateAllowedToolsBlock", targetAllowedToolsBlock == null ? "" : targetAllowedToolsBlock.stripTrailing()
+                        "delegateAgenticLine", managedDelegateAgent ? "agentic = false" : "",
+                        "delegateAllowedToolsBlock", ""
                 )
         );
 
@@ -602,6 +597,9 @@ public class DockerRuntimeService {
         if (sectionMatch != null) {
             String sectionBody = sectionMatch.body();
             String rewrittenSection = mergeSectionBody(sectionBody, fragment.body());
+            if (managedDelegateAgent) {
+                rewrittenSection = removeSettingBlocks(rewrittenSection, Set.of("allowed_tools", "max_iterations"));
+            }
             if (rewrittenSection.equals(sectionBody)) {
                 return original;
             }
@@ -679,6 +677,20 @@ public class DockerRuntimeService {
             );
         }
         return rewritten;
+    }
+
+    private String removeSettingBlocks(String sectionBody, Set<String> keysToRemove) {
+        if (!StringUtils.hasText(sectionBody) || keysToRemove == null || keysToRemove.isEmpty()) {
+            return normalizeSectionBody(sectionBody);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (SettingBlock block : parseSettingBlocks(sectionBody)) {
+            if (keysToRemove.contains(block.key())) {
+                continue;
+            }
+            builder.append(normalizeSectionBody(block.body()));
+        }
+        return normalizeSectionBody(builder.toString());
     }
 
     private List<SettingBlock> parseSettingBlocks(String sectionBody) {
@@ -760,15 +772,6 @@ public class DockerRuntimeService {
         return normalized + replacementBlock;
     }
 
-    private String buildTomlStringArrayBlock(String settingName, List<String> values) {
-        StringBuilder builder = new StringBuilder(settingName).append(" = [\n");
-        for (String value : values) {
-            builder.append("  \"").append(escapeTomlString(value)).append("\",\n");
-        }
-        builder.append("]\n");
-        return builder.toString();
-    }
-
     private DelegateAgentManifestSpec resolveDelegateAgentManifest(String containerName,
                                                                   UUID instanceId,
                                                                   int gatewayHostPort) {
@@ -817,25 +820,22 @@ public class DockerRuntimeService {
                     manifestAgentId.trim());
             return null;
         }
-        LinkedHashSet<String> allowedTools = new LinkedHashSet<>();
-        addIfHasText(allowedTools, firstNonBlank(
+        String manifestMode = findJsonStringValue(MANIFEST_MODE_PATTERN, manifestText);
+        String entrySkill = firstNonBlank(
                 findJsonStringValue(MANIFEST_ENTRY_SKILL_PATTERN, manifestText),
                 findJsonStringValue(MANIFEST_ENTRY_SKILL_CAMEL_PATTERN, manifestText)
-        ));
+        );
         String skillsArrayBody = findDelimitedValue(MANIFEST_SKILLS_ARRAY_PATTERN, manifestText);
-        if (StringUtils.hasText(skillsArrayBody)) {
-            Matcher matcher = JSON_QUOTED_STRING_PATTERN.matcher(skillsArrayBody);
-            while (matcher.find()) {
-                addIfHasText(allowedTools, unescapeJsonString(matcher.group(1)));
-            }
-        }
-        if (allowedTools.isEmpty()) {
-            log.warn("skip delegate agent allowlist sync for {}: manifest {} contains no skills",
+        boolean managedMode = "managed".equalsIgnoreCase(manifestMode)
+                || StringUtils.hasText(entrySkill)
+                || StringUtils.hasText(skillsArrayBody);
+        if (!managedMode) {
+            log.warn("skip delegate agent profile sync for {}: manifest {} is not a managed delegate",
                     delegateAgentId,
                     manifestPath);
             return null;
         }
-        return new DelegateAgentManifestSpec(delegateAgentId, List.copyOf(allowedTools), manifestPath);
+        return new DelegateAgentManifestSpec(delegateAgentId, true, manifestPath);
     }
 
     private SectionMatch findDelegateAgentSection(String config, String delegateAgentId) {
@@ -905,13 +905,6 @@ public class DockerRuntimeService {
         return normalizedBase.endsWith("/")
                 ? normalizedBase + normalizedRelative
                 : normalizedBase + "/" + normalizedRelative;
-    }
-
-    private void addIfHasText(Set<String> values, String candidate) {
-        if (values == null || !StringUtils.hasText(candidate)) {
-            return;
-        }
-        values.add(candidate.trim());
     }
 
     private String escapeTomlString(String value) {
@@ -1327,7 +1320,7 @@ public class DockerRuntimeService {
         return properties.getContainerPrefix() + "-" + instanceId;
     }
 
-    private record DelegateAgentManifestSpec(String agentId, List<String> allowedTools, String manifestPath) {
+    private record DelegateAgentManifestSpec(String agentId, boolean managedMode, String manifestPath) {
     }
 
     private record SectionMatch(int bodyStart, int bodyEnd, String body) {
