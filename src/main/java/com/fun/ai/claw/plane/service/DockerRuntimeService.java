@@ -803,16 +803,61 @@ public class DockerRuntimeService {
     }
 
     private CommandResult writeConfigToContainer(String containerName, String configText) {
+        if (containerRunning(containerName)) {
+            CommandResult inlineWrite = runDockerWithInput(
+                    List.of(
+                            properties.getCommand(),
+                            "exec",
+                            "-i",
+                            containerName,
+                            "/bin/busybox",
+                            "sh",
+                            "-lc",
+                            "cat > /data/zeroclaw/config.toml && chmod 644 /data/zeroclaw/config.toml"
+                    ),
+                    (configText == null ? "" : configText).getBytes(StandardCharsets.UTF_8)
+            );
+            if (inlineWrite.exitCode == 0) {
+                return inlineWrite;
+            }
+            log.warn("inline config write failed for {}: {}, fallback to docker cp",
+                    containerName,
+                    inlineWrite.output == null ? "" : inlineWrite.output.trim());
+        }
+
         Path tempFile = null;
         try {
             tempFile = Files.createTempFile("fun-ai-claw-config-", ".toml");
             Files.writeString(tempFile, configText == null ? "" : configText, StandardCharsets.UTF_8);
-            return runDocker(List.of(
+            tempFile.toFile().setReadable(true, false);
+            tempFile.toFile().setWritable(true, true);
+
+            CommandResult copyResult = runDocker(List.of(
                     properties.getCommand(),
                     "cp",
                     tempFile.toString(),
                     containerName + ":/data/zeroclaw/config.toml"
             ));
+            if (copyResult.exitCode != 0) {
+                return copyResult;
+            }
+            if (containerRunning(containerName)) {
+                CommandResult chmodResult = runDocker(List.of(
+                        properties.getCommand(),
+                        "exec",
+                        containerName,
+                        "/bin/busybox",
+                        "chmod",
+                        "644",
+                        "/data/zeroclaw/config.toml"
+                ));
+                if (chmodResult.exitCode != 0) {
+                    log.warn("failed to chmod config.toml in {} after docker cp: {}",
+                            containerName,
+                            chmodResult.output == null ? "" : chmodResult.output.trim());
+                }
+            }
+            return copyResult;
         } catch (IOException ex) {
             return new CommandResult(1, "io error: " + ex.getMessage());
         } finally {
