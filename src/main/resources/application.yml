@@ -51,6 +51,7 @@ app:
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
     delegate-agent-profile-enabled: ${DOCKER_DELEGATE_AGENT_PROFILE_ENABLED:true}
     delegate-agent-profile-id: ${DOCKER_DELEGATE_AGENT_PROFILE_ID:mgc-novel-to-script}
+    delegate-agent-manifest-relative-path: zeroclaw-agent.manifest.json
     delegate-agent-provider-override: ${DOCKER_DELEGATE_AGENT_PROVIDER_OVERRIDE:}
     delegate-agent-model-override: ${DOCKER_DELEGATE_AGENT_MODEL_OVERRIDE:}
     delegate-agent-temperature-override: ${DOCKER_DELEGATE_AGENT_TEMPERATURE_OVERRIDE:}

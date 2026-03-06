@@ -1,5 +1,7 @@
 package com.fun.ai.claw.plane.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fun.ai.claw.plane.config.DockerRuntimeProperties;
 import com.fun.ai.claw.plane.model.CommandAction;
 import org.slf4j.Logger;
@@ -18,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -62,10 +65,13 @@ public class DockerRuntimeService {
             Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern DELEGATE_TEMPERATURE_PATTERN =
             Pattern.compile("(?m)^\\s*temperature\\s*=\\s*([-+]?[0-9]+(?:\\.[0-9]+)?)\\s*$");
+    private static final Pattern DELEGATE_ALLOWED_TOOLS_PATTERN =
+            Pattern.compile("(?ms)^\\s*allowed_tools\\s*=\\s*\\[(.*?)]\\s*$");
 
     private final DockerRuntimeProperties properties;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
     private final HttpClient healthProbeClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public DockerRuntimeService(DockerRuntimeProperties properties) {
         this.properties = properties;
@@ -446,7 +452,12 @@ public class DockerRuntimeService {
             }
 
             String originalConfig = read.output;
-            String rewrittenConfig = rewriteRuntimeSettings(originalConfig, openSkillsDir);
+            DelegateAgentManifestSpec delegateAgentManifest = resolveDelegateAgentManifest(
+                    containerName,
+                    instanceId,
+                    gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
+            );
+            String rewrittenConfig = rewriteRuntimeSettings(originalConfig, openSkillsDir, delegateAgentManifest);
             if (rewrittenConfig.equals(originalConfig)) {
                 return;
             }
@@ -483,10 +494,12 @@ public class DockerRuntimeService {
         }
     }
 
-    private String rewriteRuntimeSettings(String config, String openSkillsDir) {
+    private String rewriteRuntimeSettings(String config,
+                                          String openSkillsDir,
+                                          DelegateAgentManifestSpec delegateAgentManifest) {
         String rewritten = rewriteGatewaySettings(config);
         rewritten = rewriteSkillsSettings(rewritten, openSkillsDir);
-        return rewriteDelegateAgentProfileSettings(rewritten);
+        return rewriteDelegateAgentProfileSettings(rewritten, delegateAgentManifest);
     }
 
     private String rewriteGatewaySettings(String config) {
@@ -581,7 +594,7 @@ public class DockerRuntimeService {
                 + targetPromptInjectionMode + "\n";
     }
 
-    private String rewriteDelegateAgentProfileSettings(String config) {
+    private String rewriteDelegateAgentProfileSettings(String config, DelegateAgentManifestSpec delegateAgentManifest) {
         String original = config == null ? "" : config;
         if (!properties.isDelegateAgentProfileEnabled()) {
             return original;
@@ -612,21 +625,19 @@ public class DockerRuntimeService {
             return original;
         }
 
-        String sectionHeader = "[model_routes.agents.\"" + escapeTomlString(delegateAgentId) + "\"]";
+        List<String> manifestAllowedTools = delegateAgentManifest != null
+                && delegateAgentId.equals(delegateAgentManifest.agentId())
+                ? delegateAgentManifest.allowedTools()
+                : List.of();
+        String sectionHeader = "[agents.\"" + escapeTomlString(delegateAgentId) + "\"]";
         String targetProviderLine = "provider = \"" + escapeTomlString(resolvedProvider.trim()) + "\"";
         String targetModelLine = "model = \"" + escapeTomlString(resolvedModel.trim()) + "\"";
         String targetTemperatureLine = StringUtils.hasText(resolvedTemperature)
                 ? "temperature = " + resolvedTemperature.trim()
                 : null;
-        Pattern sectionPattern = Pattern.compile(
-                "(?m)^\\[\\s*model_routes\\s*\\.\\s*agents\\s*\\.\\s*(?:\""
-                        + Pattern.quote(escapeTomlString(delegateAgentId))
-                        + "\"|'"
-                        + Pattern.quote(delegateAgentId)
-                        + "'|"
-                        + Pattern.quote(delegateAgentId)
-                        + ")\\s*]\\s*$"
-        );
+        String targetAllowedToolsBlock = manifestAllowedTools.isEmpty()
+                ? null
+                : buildTomlStringArrayBlock("allowed_tools", manifestAllowedTools);
 
         if (original.isBlank()) {
             StringBuilder builder = new StringBuilder(sectionHeader)
@@ -636,22 +647,16 @@ public class DockerRuntimeService {
             if (targetTemperatureLine != null) {
                 builder.append(targetTemperatureLine).append('\n');
             }
+            if (targetAllowedToolsBlock != null) {
+                builder.append("agentic = true\n");
+                builder.append(targetAllowedToolsBlock);
+            }
             return builder.toString();
         }
 
-        Matcher sectionMatcher = sectionPattern.matcher(original);
-        if (sectionMatcher.find()) {
-            int sectionStart = sectionMatcher.end();
-            int sectionEnd = original.length();
-            Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(original);
-            while (sectionHeaderMatcher.find(sectionStart)) {
-                if (sectionHeaderMatcher.start() > sectionStart) {
-                    sectionEnd = sectionHeaderMatcher.start();
-                    break;
-                }
-            }
-
-            String sectionBody = original.substring(sectionStart, sectionEnd);
+        SectionMatch sectionMatch = findDelegateAgentSection(original, delegateAgentId);
+        if (sectionMatch != null) {
+            String sectionBody = sectionMatch.body();
             String rewrittenSection = sectionBody;
             if (!StringUtils.hasText(findStringValue(DELEGATE_PROVIDER_PATTERN, sectionBody))) {
                 rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_PROVIDER_PATTERN, targetProviderLine);
@@ -662,10 +667,19 @@ public class DockerRuntimeService {
             if (targetTemperatureLine != null && !StringUtils.hasText(findNumericValue(DELEGATE_TEMPERATURE_PATTERN, sectionBody))) {
                 rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_TEMPERATURE_PATTERN, targetTemperatureLine);
             }
+            if (targetAllowedToolsBlock != null) {
+                rewrittenSection = setOrReplaceSettingBlock(
+                        rewrittenSection,
+                        DELEGATE_ALLOWED_TOOLS_PATTERN,
+                        targetAllowedToolsBlock
+                );
+            }
             if (rewrittenSection.equals(sectionBody)) {
                 return original;
             }
-            return original.substring(0, sectionStart) + rewrittenSection + original.substring(sectionEnd);
+            return original.substring(0, sectionMatch.bodyStart())
+                    + rewrittenSection
+                    + original.substring(sectionMatch.bodyEnd());
         }
 
         String suffix = original.endsWith("\n") ? "" : "\n";
@@ -676,6 +690,10 @@ public class DockerRuntimeService {
                 .append(targetModelLine).append('\n');
         if (targetTemperatureLine != null) {
             builder.append(targetTemperatureLine).append('\n');
+        }
+        if (targetAllowedToolsBlock != null) {
+            builder.append("agentic = true\n");
+            builder.append(targetAllowedToolsBlock);
         }
         return builder.toString();
     }
@@ -698,6 +716,193 @@ public class DockerRuntimeService {
             normalized += "\n";
         }
         return normalized + replacementLine + "\n";
+    }
+
+    private String setOrReplaceSettingBlock(String section, Pattern blockPattern, String replacementBlock) {
+        Matcher matcher = blockPattern.matcher(section);
+        if (matcher.find()) {
+            return matcher.replaceFirst(Matcher.quoteReplacement(replacementBlock));
+        }
+        String normalized = section;
+        if (!normalized.isEmpty() && !normalized.endsWith("\n")) {
+            normalized += "\n";
+        }
+        return normalized + replacementBlock;
+    }
+
+    private String buildTomlStringArrayBlock(String settingName, List<String> values) {
+        StringBuilder builder = new StringBuilder(settingName).append(" = [\n");
+        for (String value : values) {
+            builder.append("  \"").append(escapeTomlString(value)).append("\",\n");
+        }
+        builder.append("]\n");
+        return builder.toString();
+    }
+
+    private DelegateAgentManifestSpec resolveDelegateAgentManifest(String containerName,
+                                                                  UUID instanceId,
+                                                                  int gatewayHostPort) {
+        if (!properties.isDelegateAgentProfileEnabled()) {
+            return null;
+        }
+        String delegateAgentId = StringUtils.hasText(properties.getDelegateAgentProfileId())
+                ? properties.getDelegateAgentProfileId().trim()
+                : "";
+        if (!StringUtils.hasText(delegateAgentId)) {
+            return null;
+        }
+        String workspacePath = resolveTemplate(properties.getAgentWorkspaceContainerPathTemplate(), instanceId, gatewayHostPort);
+        if (!StringUtils.hasText(workspacePath)) {
+            log.warn("skip delegate agent allowlist sync for {}: workspace path is blank", delegateAgentId);
+            return null;
+        }
+        String manifestRelativePath = StringUtils.hasText(properties.getDelegateAgentManifestRelativePath())
+                ? properties.getDelegateAgentManifestRelativePath().trim()
+                : "zeroclaw-agent.manifest.json";
+        String manifestPath = joinContainerPath(workspacePath.trim(), manifestRelativePath);
+        CommandResult read = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "cat",
+                manifestPath
+        ));
+        if (read.exitCode != 0 || !StringUtils.hasText(read.output())) {
+            log.warn("skip delegate agent allowlist sync for {}: unable to read manifest {} ({})",
+                    delegateAgentId,
+                    manifestPath,
+                    read.output == null ? "" : read.output.trim());
+            return null;
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(read.output());
+            String manifestAgentId = firstNonBlank(
+                    jsonText(root, "agent_id"),
+                    jsonText(root, "agentId")
+            );
+            if (StringUtils.hasText(manifestAgentId) && !delegateAgentId.equals(manifestAgentId.trim())) {
+                log.warn("skip delegate agent allowlist sync for {}: manifest agent_id={} does not match",
+                        delegateAgentId,
+                        manifestAgentId.trim());
+                return null;
+            }
+            LinkedHashSet<String> allowedTools = new LinkedHashSet<>();
+            addIfHasText(allowedTools, firstNonBlank(
+                    jsonText(root, "entry_skill"),
+                    jsonText(root, "entrySkill")
+            ));
+            JsonNode skillsNode = root.path("skills");
+            if (skillsNode.isArray()) {
+                for (JsonNode item : skillsNode) {
+                    if (item != null && item.isTextual()) {
+                        addIfHasText(allowedTools, item.asText());
+                    }
+                }
+            }
+            if (allowedTools.isEmpty()) {
+                log.warn("skip delegate agent allowlist sync for {}: manifest {} contains no skills",
+                        delegateAgentId,
+                        manifestPath);
+                return null;
+            }
+            return new DelegateAgentManifestSpec(delegateAgentId, List.copyOf(allowedTools), manifestPath);
+        } catch (IOException ex) {
+            log.warn("skip delegate agent allowlist sync for {}: failed to parse manifest {} ({})",
+                    delegateAgentId,
+                    manifestPath,
+                    ex.getMessage());
+            return null;
+        }
+    }
+
+    private SectionMatch findDelegateAgentSection(String config, String delegateAgentId) {
+        if (!StringUtils.hasText(config) || !StringUtils.hasText(delegateAgentId)) {
+            return null;
+        }
+        SectionMatch directAgentSection = findSection(config, buildAgentSectionPattern(delegateAgentId));
+        if (directAgentSection != null) {
+            return directAgentSection;
+        }
+        return findSection(config, buildModelRoutesAgentSectionPattern(delegateAgentId));
+    }
+
+    private SectionMatch findSection(String config, Pattern sectionPattern) {
+        Matcher sectionMatcher = sectionPattern.matcher(config);
+        if (!sectionMatcher.find()) {
+            return null;
+        }
+        int bodyStart = sectionMatcher.end();
+        int bodyEnd = config.length();
+        Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(config);
+        while (sectionHeaderMatcher.find(bodyStart)) {
+            if (sectionHeaderMatcher.start() > bodyStart) {
+                bodyEnd = sectionHeaderMatcher.start();
+                break;
+            }
+        }
+        return new SectionMatch(bodyStart, bodyEnd, config.substring(bodyStart, bodyEnd));
+    }
+
+    private Pattern buildAgentSectionPattern(String delegateAgentId) {
+        return Pattern.compile(
+                "(?m)^\\[\\s*agents\\s*\\.\\s*(?:\""
+                        + Pattern.quote(escapeTomlString(delegateAgentId))
+                        + "\"|'"
+                        + Pattern.quote(delegateAgentId)
+                        + "'|"
+                        + Pattern.quote(delegateAgentId)
+                        + ")\\s*]\\s*$"
+        );
+    }
+
+    private Pattern buildModelRoutesAgentSectionPattern(String delegateAgentId) {
+        return Pattern.compile(
+                "(?m)^\\[\\s*model_routes\\s*\\.\\s*agents\\s*\\.\\s*(?:\""
+                        + Pattern.quote(escapeTomlString(delegateAgentId))
+                        + "\"|'"
+                        + Pattern.quote(delegateAgentId)
+                        + "'|"
+                        + Pattern.quote(delegateAgentId)
+                        + ")\\s*]\\s*$"
+        );
+    }
+
+    private String joinContainerPath(String basePath, String relativePath) {
+        String normalizedBase = basePath == null ? "" : basePath.trim();
+        String normalizedRelative = relativePath == null ? "" : relativePath.trim();
+        if (!StringUtils.hasText(normalizedBase)) {
+            return normalizedRelative;
+        }
+        if (!StringUtils.hasText(normalizedRelative)) {
+            return normalizedBase;
+        }
+        if (normalizedRelative.startsWith("/")) {
+            return normalizedRelative;
+        }
+        return normalizedBase.endsWith("/")
+                ? normalizedBase + normalizedRelative
+                : normalizedBase + "/" + normalizedRelative;
+    }
+
+    private String jsonText(JsonNode node, String fieldName) {
+        if (node == null || !StringUtils.hasText(fieldName)) {
+            return null;
+        }
+        JsonNode value = node.path(fieldName);
+        if (!value.isTextual()) {
+            return null;
+        }
+        String text = value.asText();
+        return StringUtils.hasText(text) ? text.trim() : null;
+    }
+
+    private void addIfHasText(Set<String> values, String candidate) {
+        if (values == null || !StringUtils.hasText(candidate)) {
+            return;
+        }
+        values.add(candidate.trim());
     }
 
     private String escapeTomlString(String value) {
@@ -1051,6 +1256,12 @@ public class DockerRuntimeService {
 
     private String containerName(UUID instanceId) {
         return properties.getContainerPrefix() + "-" + instanceId;
+    }
+
+    private record DelegateAgentManifestSpec(String agentId, List<String> allowedTools, String manifestPath) {
+    }
+
+    private record SectionMatch(int bodyStart, int bodyEnd, String body) {
     }
 
     private record CommandResult(int exitCode, String output) {

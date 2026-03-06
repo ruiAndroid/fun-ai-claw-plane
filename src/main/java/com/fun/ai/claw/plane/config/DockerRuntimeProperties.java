@@ -36,6 +36,7 @@ public class DockerRuntimeProperties {
     private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
     private boolean delegateAgentProfileEnabled = true;
     private String delegateAgentProfileId = "mgc-novel-to-script";
+    private String delegateAgentManifestRelativePath = "zeroclaw-agent.manifest.json";
     private String delegateAgentProviderOverride = "";
     private String delegateAgentModelOverride = "";
     private String delegateAgentTemperatureOverride = "";
@@ -273,6 +274,14 @@ public class DockerRuntimeProperties {
 
     public void setDelegateAgentProfileId(String delegateAgentProfileId) {
         this.delegateAgentProfileId = delegateAgentProfileId;
+    }
+
+    public String getDelegateAgentManifestRelativePath() {
+        return delegateAgentManifestRelativePath;
+    }
+
+    public void setDelegateAgentManifestRelativePath(String delegateAgentManifestRelativePath) {
+        this.delegateAgentManifestRelativePath = delegateAgentManifestRelativePath;
     }
 
     public String getDelegateAgentProviderOverride() {
