@@ -49,6 +49,11 @@ app:
     agent-workspace-mount-read-only: true
     workspace-agents-auto-sync-enabled: true
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
+    delegate-agent-profile-enabled: ${DOCKER_DELEGATE_AGENT_PROFILE_ENABLED:true}
+    delegate-agent-profile-id: ${DOCKER_DELEGATE_AGENT_PROFILE_ID:mgc-novel-to-script}
+    delegate-agent-provider-override: ${DOCKER_DELEGATE_AGENT_PROVIDER_OVERRIDE:}
+    delegate-agent-model-override: ${DOCKER_DELEGATE_AGENT_MODEL_OVERRIDE:}
+    delegate-agent-temperature-override: ${DOCKER_DELEGATE_AGENT_TEMPERATURE_OVERRIDE:}
     api-key: ${ZEROCLAW_API_KEY:}
     stop-timeout-seconds: ${DOCKER_STOP_TIMEOUT_SECONDS:20}
     command-timeout-seconds: ${DOCKER_COMMAND_TIMEOUT_SECONDS:120}

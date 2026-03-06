@@ -50,6 +50,18 @@ public class DockerRuntimeService {
     private static final Pattern PROMPT_INJECTION_MODE_PATTERN =
             Pattern.compile("(?m)^\\s*prompt_injection_mode\\s*=\\s*\"[^\"]*\"\\s*$");
     private static final Pattern SECTION_HEADER_PATTERN = Pattern.compile("(?m)^\\[[^\\]]+\\]\\s*$");
+    private static final Pattern DEFAULT_PROVIDER_PATTERN =
+            Pattern.compile("(?m)^\\s*default_provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DEFAULT_MODEL_PATTERN =
+            Pattern.compile("(?m)^\\s*default_model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DEFAULT_TEMPERATURE_PATTERN =
+            Pattern.compile("(?m)^\\s*default_temperature\\s*=\\s*([-+]?[0-9]+(?:\\.[0-9]+)?)\\s*$");
+    private static final Pattern DELEGATE_PROVIDER_PATTERN =
+            Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DELEGATE_MODEL_PATTERN =
+            Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DELEGATE_TEMPERATURE_PATTERN =
+            Pattern.compile("(?m)^\\s*temperature\\s*=\\s*([-+]?[0-9]+(?:\\.[0-9]+)?)\\s*$");
 
     private final DockerRuntimeProperties properties;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
@@ -473,7 +485,8 @@ public class DockerRuntimeService {
 
     private String rewriteRuntimeSettings(String config, String openSkillsDir) {
         String rewritten = rewriteGatewaySettings(config);
-        return rewriteSkillsSettings(rewritten, openSkillsDir);
+        rewritten = rewriteSkillsSettings(rewritten, openSkillsDir);
+        return rewriteDelegateAgentProfileSettings(rewritten);
     }
 
     private String rewriteGatewaySettings(String config) {
@@ -568,6 +581,105 @@ public class DockerRuntimeService {
                 + targetPromptInjectionMode + "\n";
     }
 
+    private String rewriteDelegateAgentProfileSettings(String config) {
+        String original = config == null ? "" : config;
+        if (!properties.isDelegateAgentProfileEnabled()) {
+            return original;
+        }
+        String delegateAgentId = StringUtils.hasText(properties.getDelegateAgentProfileId())
+                ? properties.getDelegateAgentProfileId().trim()
+                : "";
+        if (!StringUtils.hasText(delegateAgentId)) {
+            return original;
+        }
+
+        String resolvedProvider = firstNonBlank(
+                properties.getDelegateAgentProviderOverride(),
+                findStringValue(DEFAULT_PROVIDER_PATTERN, original)
+        );
+        String resolvedModel = firstNonBlank(
+                properties.getDelegateAgentModelOverride(),
+                findStringValue(DEFAULT_MODEL_PATTERN, original)
+        );
+        String resolvedTemperature = firstNonBlank(
+                properties.getDelegateAgentTemperatureOverride(),
+                findNumericValue(DEFAULT_TEMPERATURE_PATTERN, original)
+        );
+
+        if (!StringUtils.hasText(resolvedProvider) || !StringUtils.hasText(resolvedModel)) {
+            log.warn("skip delegate agent profile enforcement for {}: unable to resolve provider/model from config.toml",
+                    delegateAgentId);
+            return original;
+        }
+
+        String sectionHeader = "[model_routes.agents.\"" + escapeTomlString(delegateAgentId) + "\"]";
+        String targetProviderLine = "provider = \"" + escapeTomlString(resolvedProvider.trim()) + "\"";
+        String targetModelLine = "model = \"" + escapeTomlString(resolvedModel.trim()) + "\"";
+        String targetTemperatureLine = StringUtils.hasText(resolvedTemperature)
+                ? "temperature = " + resolvedTemperature.trim()
+                : null;
+        Pattern sectionPattern = Pattern.compile(
+                "(?m)^\\[\\s*model_routes\\s*\\.\\s*agents\\s*\\.\\s*(?:\""
+                        + Pattern.quote(escapeTomlString(delegateAgentId))
+                        + "\"|'"
+                        + Pattern.quote(delegateAgentId)
+                        + "'|"
+                        + Pattern.quote(delegateAgentId)
+                        + ")\\s*]\\s*$"
+        );
+
+        if (original.isBlank()) {
+            StringBuilder builder = new StringBuilder(sectionHeader)
+                    .append('\n')
+                    .append(targetProviderLine).append('\n')
+                    .append(targetModelLine).append('\n');
+            if (targetTemperatureLine != null) {
+                builder.append(targetTemperatureLine).append('\n');
+            }
+            return builder.toString();
+        }
+
+        Matcher sectionMatcher = sectionPattern.matcher(original);
+        if (sectionMatcher.find()) {
+            int sectionStart = sectionMatcher.end();
+            int sectionEnd = original.length();
+            Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(original);
+            while (sectionHeaderMatcher.find(sectionStart)) {
+                if (sectionHeaderMatcher.start() > sectionStart) {
+                    sectionEnd = sectionHeaderMatcher.start();
+                    break;
+                }
+            }
+
+            String sectionBody = original.substring(sectionStart, sectionEnd);
+            String rewrittenSection = sectionBody;
+            if (!StringUtils.hasText(findStringValue(DELEGATE_PROVIDER_PATTERN, sectionBody))) {
+                rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_PROVIDER_PATTERN, targetProviderLine);
+            }
+            if (!StringUtils.hasText(findStringValue(DELEGATE_MODEL_PATTERN, sectionBody))) {
+                rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_MODEL_PATTERN, targetModelLine);
+            }
+            if (targetTemperatureLine != null && !StringUtils.hasText(findNumericValue(DELEGATE_TEMPERATURE_PATTERN, sectionBody))) {
+                rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_TEMPERATURE_PATTERN, targetTemperatureLine);
+            }
+            if (rewrittenSection.equals(sectionBody)) {
+                return original;
+            }
+            return original.substring(0, sectionStart) + rewrittenSection + original.substring(sectionEnd);
+        }
+
+        String suffix = original.endsWith("\n") ? "" : "\n";
+        StringBuilder builder = new StringBuilder(original)
+                .append(suffix)
+                .append(sectionHeader).append('\n')
+                .append(targetProviderLine).append('\n')
+                .append(targetModelLine).append('\n');
+        if (targetTemperatureLine != null) {
+            builder.append(targetTemperatureLine).append('\n');
+        }
+        return builder.toString();
+    }
+
     private String setUniqueSettingLine(String section, Pattern linePattern, String replacementLine) {
         String[] lines = section.split("\\R", -1);
         StringBuilder builder = new StringBuilder(section.length() + replacementLine.length() + 8);
@@ -595,6 +707,45 @@ public class DockerRuntimeService {
         return value
                 .replace("\\", "\\\\")
                 .replace("\"", "\\\"");
+    }
+
+    private String findStringValue(Pattern pattern, String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        Matcher matcher = pattern.matcher(text);
+        if (!matcher.find() || matcher.groupCount() < 1) {
+            return null;
+        }
+        String value = matcher.group(1);
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.replace("\\\"", "\"").replace("\\\\", "\\").trim();
+    }
+
+    private String findNumericValue(Pattern pattern, String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        Matcher matcher = pattern.matcher(text);
+        if (!matcher.find() || matcher.groupCount() < 1) {
+            return null;
+        }
+        String value = matcher.group(1);
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private void sleepSilently(long millis) {

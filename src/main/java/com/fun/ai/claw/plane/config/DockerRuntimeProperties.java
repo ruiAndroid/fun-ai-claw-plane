@@ -34,6 +34,11 @@ public class DockerRuntimeProperties {
     private boolean agentWorkspaceMountReadOnly = true;
     private boolean workspaceAgentsAutoSyncEnabled = true;
     private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
+    private boolean delegateAgentProfileEnabled = true;
+    private String delegateAgentProfileId = "mgc-novel-to-script";
+    private String delegateAgentProviderOverride = "";
+    private String delegateAgentModelOverride = "";
+    private String delegateAgentTemperatureOverride = "";
     private String apiKey;
     private long stopTimeoutSeconds = 20;
     private long commandTimeoutSeconds = 120;
@@ -252,6 +257,46 @@ public class DockerRuntimeProperties {
 
     public void setWorkspaceAgentsFilePath(String workspaceAgentsFilePath) {
         this.workspaceAgentsFilePath = workspaceAgentsFilePath;
+    }
+
+    public boolean isDelegateAgentProfileEnabled() {
+        return delegateAgentProfileEnabled;
+    }
+
+    public void setDelegateAgentProfileEnabled(boolean delegateAgentProfileEnabled) {
+        this.delegateAgentProfileEnabled = delegateAgentProfileEnabled;
+    }
+
+    public String getDelegateAgentProfileId() {
+        return delegateAgentProfileId;
+    }
+
+    public void setDelegateAgentProfileId(String delegateAgentProfileId) {
+        this.delegateAgentProfileId = delegateAgentProfileId;
+    }
+
+    public String getDelegateAgentProviderOverride() {
+        return delegateAgentProviderOverride;
+    }
+
+    public void setDelegateAgentProviderOverride(String delegateAgentProviderOverride) {
+        this.delegateAgentProviderOverride = delegateAgentProviderOverride;
+    }
+
+    public String getDelegateAgentModelOverride() {
+        return delegateAgentModelOverride;
+    }
+
+    public void setDelegateAgentModelOverride(String delegateAgentModelOverride) {
+        this.delegateAgentModelOverride = delegateAgentModelOverride;
+    }
+
+    public String getDelegateAgentTemperatureOverride() {
+        return delegateAgentTemperatureOverride;
+    }
+
+    public void setDelegateAgentTemperatureOverride(String delegateAgentTemperatureOverride) {
+        this.delegateAgentTemperatureOverride = delegateAgentTemperatureOverride;
     }
 
     public String getApiKey() {

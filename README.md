@@ -50,6 +50,11 @@ Docker-related environment variables:
 - `DOCKER_AGENT_WORKSPACE_MOUNT_READ_ONLY` (default: `true`, optional env override)
 - `DOCKER_WORKSPACE_AGENTS_AUTO_SYNC_ENABLED` (default: `true`)
 - `DOCKER_WORKSPACE_AGENTS_FILE_PATH` (default: `/zeroclaw-data/workspace/AGENTS.md`)
+- `DOCKER_DELEGATE_AGENT_PROFILE_ENABLED` (default: `true`)
+- `DOCKER_DELEGATE_AGENT_PROFILE_ID` (default: `mgc-novel-to-script`)
+- `DOCKER_DELEGATE_AGENT_PROVIDER_OVERRIDE` (default: empty, falls back to `default_provider`)
+- `DOCKER_DELEGATE_AGENT_MODEL_OVERRIDE` (default: empty, falls back to `default_model`)
+- `DOCKER_DELEGATE_AGENT_TEMPERATURE_OVERRIDE` (default: empty, falls back to `default_temperature`)
 - `ZEROCLAW_API_KEY` (default: empty)
 - `DOCKER_STOP_TIMEOUT_SECONDS` (default: `20`)
 - `DOCKER_COMMAND_TIMEOUT_SECONDS` (default: `120`)
@@ -57,6 +62,9 @@ Docker-related environment variables:
 Notes:
 - `workspace-agents-file-path` should be an absolute container path.
 - If runtime receives empty `agentsMdContent` with overwrite enabled, it will overwrite/clear existing workspace `AGENTS.md` to avoid stale prompts.
+- Plane now best-effort prewarms a delegate profile at `[model_routes.agents."mgc-novel-to-script"]` inside container `config.toml`.
+- By default, that profile reuses `default_provider`, `default_model`, and `default_temperature` from the runtime config, so the main agent does not need to call `model_routing_config` just to bootstrap this sub-agent.
+- If you want a dedicated model for the sub-agent, set the `DOCKER_DELEGATE_AGENT_*_OVERRIDE` env vars explicitly.
 
 Recommended (config file first): set these in `src/main/resources/application.yml` under `app.docker`.
 
