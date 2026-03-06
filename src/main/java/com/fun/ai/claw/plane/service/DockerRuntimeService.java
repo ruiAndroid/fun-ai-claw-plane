@@ -464,17 +464,22 @@ public class DockerRuntimeService {
     }
 
     private void enforceRuntimeConfigPolicy(String containerName, UUID instanceId, Integer gatewayHostPort) {
-        if (!properties.isRuntimeConfigPolicyEnabled()) {
-            return;
-        }
         String openSkillsDir = resolveOpenSkillsDir(
                 instanceId,
                 gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
         );
-        boolean enforceGatewayPairing = !properties.isRequirePairing();
-        boolean enforceSkills = StringUtils.hasText(openSkillsDir);
-        boolean enforceDelegateAgentProfile = properties.isDelegateAgentProfileEnabled();
-        if (!enforceGatewayPairing && !enforceSkills && !enforceDelegateAgentProfile) {
+        boolean enforceGatewaySection = properties.isGatewayRuntimeConfigPatchEnabled() && !properties.isRequirePairing();
+        boolean enforceSkillsSection = properties.isSkillsRuntimeConfigPatchEnabled() && StringUtils.hasText(openSkillsDir);
+        boolean enforceDelegateAgentSection =
+                properties.isDelegateAgentRuntimeConfigPatchEnabled() && properties.isDelegateAgentProfileEnabled();
+        boolean enforceModelRouteSection = properties.isModelRouteRuntimeConfigPatchEnabled();
+        boolean enforceQueryClassificationRuleSection = properties.isQueryClassificationRuleRuntimeConfigPatchEnabled();
+        if (!properties.isAnyRuntimeConfigPatchEnabled()
+                || (!enforceGatewaySection
+                && !enforceSkillsSection
+                && !enforceDelegateAgentSection
+                && !enforceModelRouteSection
+                && !enforceQueryClassificationRuleSection)) {
             return;
         }
 
@@ -499,11 +504,13 @@ public class DockerRuntimeService {
             }
 
             String originalConfig = read.output;
-            DelegateAgentManifestSpec delegateAgentManifest = resolveDelegateAgentManifest(
+            DelegateAgentManifestSpec delegateAgentManifest = enforceDelegateAgentSection
+                    ? resolveDelegateAgentManifest(
                     containerName,
                     instanceId,
                     gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()
-            );
+            )
+                    : null;
             String rewrittenConfig = rewriteRuntimeSettings(originalConfig, openSkillsDir, delegateAgentManifest);
             if (rewrittenConfig.equals(originalConfig)) {
                 return;
@@ -559,7 +566,7 @@ public class DockerRuntimeService {
 
     private String rewriteGatewaySettings(String config) {
         String original = config == null ? "" : config;
-        if (properties.isRequirePairing()) {
+        if (!properties.isGatewayRuntimeConfigPatchEnabled() || properties.isRequirePairing()) {
             return original;
         }
         String targetHost = StringUtils.hasText(properties.getGatewayHost())
@@ -577,7 +584,7 @@ public class DockerRuntimeService {
 
     private String rewriteSkillsSettings(String config, String openSkillsDir) {
         String original = config == null ? "" : config;
-        if (!StringUtils.hasText(openSkillsDir)) {
+        if (!properties.isSkillsRuntimeConfigPatchEnabled() || !StringUtils.hasText(openSkillsDir)) {
             return original;
         }
         RenderedSection fragment = loadRenderedSection(
@@ -589,9 +596,6 @@ public class DockerRuntimeService {
 
     private DelegateAgentProfileSpec resolveDelegateAgentProfileSpec(String config) {
         String original = config == null ? "" : config;
-        if (!properties.isDelegateAgentProfileEnabled()) {
-            return null;
-        }
         String delegateAgentId = StringUtils.hasText(properties.getDelegateAgentProfileId())
                 ? properties.getDelegateAgentProfileId().trim()
                 : "";
@@ -628,7 +632,7 @@ public class DockerRuntimeService {
 
     private String rewriteModelRouteSettings(String config, DelegateAgentProfileSpec delegateAgentProfile) {
         String original = config == null ? "" : config;
-        if (delegateAgentProfile == null) {
+        if (!properties.isModelRouteRuntimeConfigPatchEnabled() || delegateAgentProfile == null) {
             return original;
         }
         RenderedSection fragment = loadRenderedSection(
@@ -650,7 +654,7 @@ public class DockerRuntimeService {
 
     private String rewriteQueryClassificationRuleSettings(String config, DelegateAgentProfileSpec delegateAgentProfile) {
         String original = config == null ? "" : config;
-        if (delegateAgentProfile == null) {
+        if (!properties.isQueryClassificationRuleRuntimeConfigPatchEnabled() || delegateAgentProfile == null) {
             return original;
         }
         RenderedSection fragment = loadRenderedSection(
@@ -671,7 +675,9 @@ public class DockerRuntimeService {
                                                        DelegateAgentProfileSpec delegateAgentProfile,
                                                        DelegateAgentManifestSpec delegateAgentManifest) {
         String original = config == null ? "" : config;
-        if (delegateAgentProfile == null) {
+        if (!properties.isDelegateAgentRuntimeConfigPatchEnabled()
+                || !properties.isDelegateAgentProfileEnabled()
+                || delegateAgentProfile == null) {
             return original;
         }
 

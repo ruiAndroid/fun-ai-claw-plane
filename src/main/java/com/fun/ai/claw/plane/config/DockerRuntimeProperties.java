@@ -35,6 +35,11 @@ public class DockerRuntimeProperties {
     private boolean workspaceAgentsAutoSyncEnabled = true;
     private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
     private boolean runtimeConfigPolicyEnabled = false;
+    private boolean runtimeConfigGatewaySectionEnabled = false;
+    private boolean runtimeConfigSkillsSectionEnabled = false;
+    private boolean runtimeConfigDelegateAgentSectionEnabled = false;
+    private boolean runtimeConfigModelRouteSectionEnabled = false;
+    private boolean runtimeConfigQueryClassificationRuleSectionEnabled = false;
     private String gatewaySectionFragmentPath = "classpath:zeroclaw-fragments/gateway.toml";
     private String skillsSectionFragmentPath = "classpath:zeroclaw-fragments/skills.toml";
     private String modelRouteSectionFragmentPath = "classpath:zeroclaw-fragments/model-route.toml";
@@ -274,6 +279,75 @@ public class DockerRuntimeProperties {
 
     public void setRuntimeConfigPolicyEnabled(boolean runtimeConfigPolicyEnabled) {
         this.runtimeConfigPolicyEnabled = runtimeConfigPolicyEnabled;
+    }
+
+    public boolean isRuntimeConfigGatewaySectionEnabled() {
+        return runtimeConfigGatewaySectionEnabled;
+    }
+
+    public void setRuntimeConfigGatewaySectionEnabled(boolean runtimeConfigGatewaySectionEnabled) {
+        this.runtimeConfigGatewaySectionEnabled = runtimeConfigGatewaySectionEnabled;
+    }
+
+    public boolean isRuntimeConfigSkillsSectionEnabled() {
+        return runtimeConfigSkillsSectionEnabled;
+    }
+
+    public void setRuntimeConfigSkillsSectionEnabled(boolean runtimeConfigSkillsSectionEnabled) {
+        this.runtimeConfigSkillsSectionEnabled = runtimeConfigSkillsSectionEnabled;
+    }
+
+    public boolean isRuntimeConfigDelegateAgentSectionEnabled() {
+        return runtimeConfigDelegateAgentSectionEnabled;
+    }
+
+    public void setRuntimeConfigDelegateAgentSectionEnabled(boolean runtimeConfigDelegateAgentSectionEnabled) {
+        this.runtimeConfigDelegateAgentSectionEnabled = runtimeConfigDelegateAgentSectionEnabled;
+    }
+
+    public boolean isRuntimeConfigModelRouteSectionEnabled() {
+        return runtimeConfigModelRouteSectionEnabled;
+    }
+
+    public void setRuntimeConfigModelRouteSectionEnabled(boolean runtimeConfigModelRouteSectionEnabled) {
+        this.runtimeConfigModelRouteSectionEnabled = runtimeConfigModelRouteSectionEnabled;
+    }
+
+    public boolean isRuntimeConfigQueryClassificationRuleSectionEnabled() {
+        return runtimeConfigQueryClassificationRuleSectionEnabled;
+    }
+
+    public void setRuntimeConfigQueryClassificationRuleSectionEnabled(
+            boolean runtimeConfigQueryClassificationRuleSectionEnabled) {
+        this.runtimeConfigQueryClassificationRuleSectionEnabled = runtimeConfigQueryClassificationRuleSectionEnabled;
+    }
+
+    public boolean isGatewayRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled || runtimeConfigGatewaySectionEnabled;
+    }
+
+    public boolean isSkillsRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled || runtimeConfigSkillsSectionEnabled;
+    }
+
+    public boolean isDelegateAgentRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled || runtimeConfigDelegateAgentSectionEnabled;
+    }
+
+    public boolean isModelRouteRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled || runtimeConfigModelRouteSectionEnabled;
+    }
+
+    public boolean isQueryClassificationRuleRuntimeConfigPatchEnabled() {
+        return runtimeConfigPolicyEnabled || runtimeConfigQueryClassificationRuleSectionEnabled;
+    }
+
+    public boolean isAnyRuntimeConfigPatchEnabled() {
+        return isGatewayRuntimeConfigPatchEnabled()
+                || isSkillsRuntimeConfigPatchEnabled()
+                || isDelegateAgentRuntimeConfigPatchEnabled()
+                || isModelRouteRuntimeConfigPatchEnabled()
+                || isQueryClassificationRuleRuntimeConfigPatchEnabled();
     }
 
     public String getGatewaySectionFragmentPath() {
