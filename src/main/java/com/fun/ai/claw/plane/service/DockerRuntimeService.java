@@ -474,19 +474,7 @@ public class DockerRuntimeService {
                 return;
             }
 
-            CommandResult write = runDockerWithInput(
-                    List.of(
-                            properties.getCommand(),
-                            "exec",
-                            "-i",
-                            containerName,
-                            "/bin/busybox",
-                            "dd",
-                            "of=/data/zeroclaw/config.toml",
-                            "conv=fsync"
-                    ),
-                    rewrittenConfig.getBytes(StandardCharsets.UTF_8)
-            );
+            CommandResult write = writeConfigToContainer(containerName, rewrittenConfig);
             if (write.exitCode != 0) {
                 if (attempt == 30) {
                     log.warn("skip pairing enforcement for {}: failed to write config.toml ({})", containerName, write.output.trim());
@@ -498,8 +486,15 @@ public class DockerRuntimeService {
 
             CommandResult restart = runDocker(List.of(properties.getCommand(), "restart", containerName));
             if (restart.exitCode != 0) {
+                restoreOriginalConfig(containerName, originalConfig, "container restart command failed after runtime config enforcement");
                 log.warn("container restart after runtime config enforcement failed for {}: {}", containerName, restart.output.trim());
                 return;
+            }
+            try {
+                waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
+            } catch (DockerOperationException ex) {
+                restoreOriginalConfig(containerName, originalConfig, ex.getMessage());
+                throw ex;
             }
             log.info("enforced runtime config policy in {}", containerName);
             return;
@@ -738,6 +733,55 @@ public class DockerRuntimeService {
             normalized += "\n";
         }
         return normalized;
+    }
+
+    private CommandResult writeConfigToContainer(String containerName, String configText) {
+        return runDockerWithInput(
+                List.of(
+                        properties.getCommand(),
+                        "exec",
+                        "-i",
+                        containerName,
+                        "/bin/busybox",
+                        "dd",
+                        "of=/data/zeroclaw/config.toml",
+                        "conv=fsync"
+                ),
+                configText.getBytes(StandardCharsets.UTF_8)
+        );
+    }
+
+    private void restoreOriginalConfig(String containerName, String originalConfig, String reason) {
+        if (originalConfig == null) {
+            log.error("failed to restore config for {} after runtime patch failure: original config is null ({})",
+                    containerName,
+                    reason);
+            return;
+        }
+        CommandResult rollbackWrite = writeConfigToContainer(containerName, originalConfig);
+        if (rollbackWrite.exitCode != 0) {
+            log.error("failed to restore original config for {} after runtime patch failure ({}): {}",
+                    containerName,
+                    reason,
+                    rollbackWrite.output == null ? "" : rollbackWrite.output.trim());
+            return;
+        }
+        CommandResult rollbackRestart = runDocker(List.of(properties.getCommand(), "restart", containerName));
+        if (rollbackRestart.exitCode != 0) {
+            log.error("failed to restart {} after restoring original config ({}): {}",
+                    containerName,
+                    reason,
+                    rollbackRestart.output == null ? "" : rollbackRestart.output.trim());
+            return;
+        }
+        try {
+            waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, null));
+            log.warn("restored original config for {} after runtime patch failure: {}", containerName, reason);
+        } catch (DockerOperationException ex) {
+            log.error("restored original config for {} but gateway is still unhealthy after rollback: {}",
+                    containerName,
+                    ex.getMessage());
+        }
     }
 
     private String setUniqueSettingLine(String section, Pattern linePattern, String replacementLine) {
@@ -1113,11 +1157,17 @@ public class DockerRuntimeService {
             sleepSilently(intervalMillis);
         }
 
-        log.warn("gateway readiness check timed out after {}s for {} at {} (last error: {})",
-                timeoutSeconds,
-                containerName,
-                uri,
-                lastError);
+        throw new DockerOperationException(
+                "gateway readiness check timed out after "
+                        + timeoutSeconds
+                        + "s for "
+                        + containerName
+                        + " at "
+                        + uri
+                        + " (last error: "
+                        + lastError
+                        + ")"
+        );
     }
 
     private CommandResult runDocker(List<String> command) {
