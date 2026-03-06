@@ -53,7 +53,7 @@ app:
     runtime-config-gateway-section-enabled: ${DOCKER_RUNTIME_CONFIG_GATEWAY_SECTION_ENABLED:true}
     runtime-config-skills-section-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_SECTION_ENABLED:false}
     runtime-config-delegate-agent-section-enabled: ${DOCKER_RUNTIME_CONFIG_DELEGATE_AGENT_SECTION_ENABLED:true}
-    runtime-config-model-route-section-enabled: ${DOCKER_RUNTIME_CONFIG_MODEL_ROUTE_SECTION_ENABLED:false}
+    runtime-config-model-route-section-enabled: ${DOCKER_RUNTIME_CONFIG_MODEL_ROUTE_SECTION_ENABLED:true}
     runtime-config-query-classification-rule-section-enabled: ${DOCKER_RUNTIME_CONFIG_QUERY_CLASSIFICATION_RULE_SECTION_ENABLED:false}
     gateway-section-fragment-path: classpath:zeroclaw-fragments/gateway.toml
     skills-section-fragment-path: classpath:zeroclaw-fragments/skills.toml
