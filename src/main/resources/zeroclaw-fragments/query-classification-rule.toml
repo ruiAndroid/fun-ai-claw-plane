@@ -1,6 +1,6 @@
 [[query_classification.rules]]
 hint = "{{delegateAgentId}}"
-keywords = ["小说转剧本", "一句话剧本", "剧本", "分集大纲", "故事梗概", "角色设定"]
+keywords = ["\u5c0f\u8bf4\u8f6c\u5267\u672c", "\u4e00\u53e5\u8bdd\u5267\u672c", "\u5267\u672c", "\u5206\u96c6\u5927\u7eb2", "\u6545\u4e8b\u68d7\u6982", "\u89d2\u8272\u8bbe\u5b9a"]
 literals = ["script_type=", "expected_episode_count", "target_audience"]
 priority = 100
 min_length = 6
