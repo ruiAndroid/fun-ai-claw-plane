@@ -459,6 +459,7 @@ public class DockerRuntimeService {
                 return;
             }
 
+            waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             CommandResult write = writeConfigToContainer(containerName, rewrittenConfig);
             if (write.exitCode != 0) {
                 if (attempt == 30) {
@@ -474,12 +475,6 @@ public class DockerRuntimeService {
                 restoreOriginalConfig(containerName, originalConfig, "container restart command failed after runtime config enforcement");
                 log.warn("container restart after runtime config enforcement failed for {}: {}", containerName, restart.output.trim());
                 return;
-            }
-            try {
-                waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
-            } catch (DockerOperationException ex) {
-                restoreOriginalConfig(containerName, originalConfig, ex.getMessage());
-                throw ex;
             }
             log.info("enforced runtime config policy in {}", containerName);
             return;
