@@ -4,6 +4,8 @@ import com.fun.ai.claw.plane.config.DockerRuntimeProperties;
 import com.fun.ai.claw.plane.model.CommandAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -79,11 +81,13 @@ public class DockerRuntimeService {
             Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
 
     private final DockerRuntimeProperties properties;
+    private final ResourceLoader resourceLoader;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
     private final HttpClient healthProbeClient;
 
-    public DockerRuntimeService(DockerRuntimeProperties properties) {
+    public DockerRuntimeService(DockerRuntimeProperties properties, ResourceLoader resourceLoader) {
         this.properties = properties;
+        this.resourceLoader = resourceLoader;
         this.healthProbeClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
@@ -519,43 +523,14 @@ public class DockerRuntimeService {
         String targetHost = StringUtils.hasText(properties.getGatewayHost())
                 ? properties.getGatewayHost().trim()
                 : "0.0.0.0";
-        String targetRequirePairing = "require_pairing = false";
-        String targetAllowPublicBind = "allow_public_bind = " + properties.isAllowPublicBind();
-        String targetHostLine = "host = \"" + targetHost + "\"";
-        if (original.isBlank()) {
-            return "[gateway]\n"
-                    + targetHostLine + "\n"
-                    + targetRequirePairing + "\n"
-                    + targetAllowPublicBind + "\n";
-        }
-
-        Matcher gatewayMatcher = GATEWAY_SECTION_PATTERN.matcher(original);
-        if (gatewayMatcher.find()) {
-            int sectionStart = gatewayMatcher.end();
-            int sectionEnd = original.length();
-            Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(original);
-            while (sectionHeaderMatcher.find(sectionStart)) {
-                if (sectionHeaderMatcher.start() > sectionStart) {
-                    sectionEnd = sectionHeaderMatcher.start();
-                    break;
-                }
-            }
-
-            String gatewaySection = original.substring(sectionStart, sectionEnd);
-            String rewrittenSection = setUniqueSettingLine(gatewaySection, REQUIRE_PAIRING_PATTERN, targetRequirePairing);
-            rewrittenSection = setUniqueSettingLine(rewrittenSection, GATEWAY_HOST_PATTERN, targetHostLine);
-            rewrittenSection = setUniqueSettingLine(rewrittenSection, ALLOW_PUBLIC_BIND_PATTERN, targetAllowPublicBind);
-            if (rewrittenSection.equals(gatewaySection)) {
-                return original;
-            }
-            return original.substring(0, sectionStart) + rewrittenSection + original.substring(sectionEnd);
-        }
-
-        String suffix = original.endsWith("\n") ? "" : "\n";
-        return original + suffix + "[gateway]\n"
-                + targetHostLine + "\n"
-                + targetRequirePairing + "\n"
-                + targetAllowPublicBind + "\n";
+        RenderedSection fragment = loadRenderedSection(
+                properties.getGatewaySectionFragmentPath(),
+                Map.of(
+                        "gatewayHost", escapeTomlString(targetHost),
+                        "allowPublicBind", String.valueOf(properties.isAllowPublicBind())
+                )
+        );
+        return mergeNamedSection(original, GATEWAY_SECTION_PATTERN, fragment);
     }
 
     private String rewriteSkillsSettings(String config, String openSkillsDir) {
@@ -563,44 +538,11 @@ public class DockerRuntimeService {
         if (!StringUtils.hasText(openSkillsDir)) {
             return original;
         }
-        String targetOpenSkillsEnabled = "open_skills_enabled = true";
-        String targetOpenSkillsDir = "open_skills_dir = \"" + escapeTomlString(openSkillsDir.trim()) + "\"";
-        String targetPromptInjectionMode = "prompt_injection_mode = \"full\"";
-
-        if (original.isBlank()) {
-            return "[skills]\n"
-                    + targetOpenSkillsEnabled + "\n"
-                    + targetOpenSkillsDir + "\n"
-                    + targetPromptInjectionMode + "\n";
-        }
-
-        Matcher skillsMatcher = SKILLS_SECTION_PATTERN.matcher(original);
-        if (skillsMatcher.find()) {
-            int sectionStart = skillsMatcher.end();
-            int sectionEnd = original.length();
-            Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(original);
-            while (sectionHeaderMatcher.find(sectionStart)) {
-                if (sectionHeaderMatcher.start() > sectionStart) {
-                    sectionEnd = sectionHeaderMatcher.start();
-                    break;
-                }
-            }
-
-            String skillsSection = original.substring(sectionStart, sectionEnd);
-            String rewrittenSection = setUniqueSettingLine(skillsSection, OPEN_SKILLS_ENABLED_PATTERN, targetOpenSkillsEnabled);
-            rewrittenSection = setUniqueSettingLine(rewrittenSection, OPEN_SKILLS_DIR_PATTERN, targetOpenSkillsDir);
-            rewrittenSection = setUniqueSettingLine(rewrittenSection, PROMPT_INJECTION_MODE_PATTERN, targetPromptInjectionMode);
-            if (rewrittenSection.equals(skillsSection)) {
-                return original;
-            }
-            return original.substring(0, sectionStart) + rewrittenSection + original.substring(sectionEnd);
-        }
-
-        String suffix = original.endsWith("\n") ? "" : "\n";
-        return original + suffix + "[skills]\n"
-                + targetOpenSkillsEnabled + "\n"
-                + targetOpenSkillsDir + "\n"
-                + targetPromptInjectionMode + "\n";
+        RenderedSection fragment = loadRenderedSection(
+                properties.getSkillsSectionFragmentPath(),
+                Map.of("openSkillsDir", escapeTomlString(openSkillsDir.trim()))
+        );
+        return mergeNamedSection(original, SKILLS_SECTION_PATTERN, fragment);
     }
 
     private String rewriteDelegateAgentProfileSettings(String config, DelegateAgentManifestSpec delegateAgentManifest) {
@@ -638,51 +580,28 @@ public class DockerRuntimeService {
                 && delegateAgentId.equals(delegateAgentManifest.agentId())
                 ? delegateAgentManifest.allowedTools()
                 : List.of();
-        String sectionHeader = "[agents.\"" + escapeTomlString(delegateAgentId) + "\"]";
-        String targetProviderLine = "provider = \"" + escapeTomlString(resolvedProvider.trim()) + "\"";
-        String targetModelLine = "model = \"" + escapeTomlString(resolvedModel.trim()) + "\"";
         String targetTemperatureLine = StringUtils.hasText(resolvedTemperature)
                 ? "temperature = " + resolvedTemperature.trim()
                 : null;
         String targetAllowedToolsBlock = manifestAllowedTools.isEmpty()
                 ? null
                 : buildTomlStringArrayBlock("allowed_tools", manifestAllowedTools);
-
-        if (original.isBlank()) {
-            StringBuilder builder = new StringBuilder(sectionHeader)
-                    .append('\n')
-                    .append(targetProviderLine).append('\n')
-                    .append(targetModelLine).append('\n');
-            if (targetTemperatureLine != null) {
-                builder.append(targetTemperatureLine).append('\n');
-            }
-            if (targetAllowedToolsBlock != null) {
-                builder.append("agentic = true\n");
-                builder.append(targetAllowedToolsBlock);
-            }
-            return builder.toString();
-        }
+        RenderedSection fragment = loadRenderedSection(
+                properties.getDelegateAgentSectionFragmentPath(),
+                Map.of(
+                        "delegateAgentId", escapeTomlString(delegateAgentId),
+                        "delegateProvider", escapeTomlString(resolvedProvider.trim()),
+                        "delegateModel", escapeTomlString(resolvedModel.trim()),
+                        "delegateTemperatureLine", targetTemperatureLine == null ? "" : targetTemperatureLine,
+                        "delegateAgenticLine", targetAllowedToolsBlock == null ? "" : "agentic = true",
+                        "delegateAllowedToolsBlock", targetAllowedToolsBlock == null ? "" : targetAllowedToolsBlock.stripTrailing()
+                )
+        );
 
         SectionMatch sectionMatch = findDelegateAgentSection(original, delegateAgentId);
         if (sectionMatch != null) {
             String sectionBody = sectionMatch.body();
-            String rewrittenSection = sectionBody;
-            if (!StringUtils.hasText(findStringValue(DELEGATE_PROVIDER_PATTERN, sectionBody))) {
-                rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_PROVIDER_PATTERN, targetProviderLine);
-            }
-            if (!StringUtils.hasText(findStringValue(DELEGATE_MODEL_PATTERN, sectionBody))) {
-                rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_MODEL_PATTERN, targetModelLine);
-            }
-            if (targetTemperatureLine != null && !StringUtils.hasText(findNumericValue(DELEGATE_TEMPERATURE_PATTERN, sectionBody))) {
-                rewrittenSection = setUniqueSettingLine(rewrittenSection, DELEGATE_TEMPERATURE_PATTERN, targetTemperatureLine);
-            }
-            if (targetAllowedToolsBlock != null) {
-                rewrittenSection = setOrReplaceSettingBlock(
-                        rewrittenSection,
-                        DELEGATE_ALLOWED_TOOLS_PATTERN,
-                        targetAllowedToolsBlock
-                );
-            }
+            String rewrittenSection = mergeSectionBody(sectionBody, fragment.body());
             if (rewrittenSection.equals(sectionBody)) {
                 return original;
             }
@@ -692,19 +611,121 @@ public class DockerRuntimeService {
         }
 
         String suffix = original.endsWith("\n") ? "" : "\n";
-        StringBuilder builder = new StringBuilder(original)
-                .append(suffix)
-                .append(sectionHeader).append('\n')
-                .append(targetProviderLine).append('\n')
-                .append(targetModelLine).append('\n');
-        if (targetTemperatureLine != null) {
-            builder.append(targetTemperatureLine).append('\n');
+        return original + suffix + fragment.header() + "\n" + normalizeSectionBody(fragment.body());
+    }
+
+    private RenderedSection loadRenderedSection(String resourceLocation, Map<String, String> variables) {
+        String normalizedLocation = StringUtils.hasText(resourceLocation)
+                ? resourceLocation.trim()
+                : "";
+        if (!StringUtils.hasText(normalizedLocation)) {
+            throw new DockerOperationException("config fragment path is blank");
         }
-        if (targetAllowedToolsBlock != null) {
-            builder.append("agentic = true\n");
-            builder.append(targetAllowedToolsBlock);
+        Resource resource = resourceLoader.getResource(normalizedLocation);
+        if (!resource.exists()) {
+            throw new DockerOperationException("config fragment not found: " + normalizedLocation);
         }
-        return builder.toString();
+        try {
+            String template = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            String rendered = renderTemplate(template, variables);
+            Matcher sectionHeaderMatcher = SECTION_HEADER_PATTERN.matcher(rendered);
+            if (!sectionHeaderMatcher.find()) {
+                throw new DockerOperationException("config fragment missing section header: " + normalizedLocation);
+            }
+            String header = sectionHeaderMatcher.group().trim();
+            String body = rendered.substring(sectionHeaderMatcher.end());
+            return new RenderedSection(header, body);
+        } catch (IOException ex) {
+            throw new DockerOperationException("failed to read config fragment: " + normalizedLocation + " (" + ex.getMessage() + ")");
+        }
+    }
+
+    private String renderTemplate(String template, Map<String, String> variables) {
+        String rendered = template == null ? "" : template.replace("\r\n", "\n");
+        if (variables == null || variables.isEmpty()) {
+            return rendered;
+        }
+        for (Map.Entry<String, String> entry : variables.entrySet()) {
+            String placeholder = "{{" + entry.getKey() + "}}";
+            String value = entry.getValue() == null ? "" : entry.getValue();
+            rendered = rendered.replace(placeholder, value);
+        }
+        return rendered;
+    }
+
+    private String mergeNamedSection(String originalConfig, Pattern sectionPattern, RenderedSection fragment) {
+        String original = originalConfig == null ? "" : originalConfig;
+        SectionMatch sectionMatch = findSection(original, sectionPattern);
+        if (sectionMatch != null) {
+            String rewrittenSection = mergeSectionBody(sectionMatch.body(), fragment.body());
+            if (rewrittenSection.equals(sectionMatch.body())) {
+                return original;
+            }
+            return original.substring(0, sectionMatch.bodyStart())
+                    + rewrittenSection
+                    + original.substring(sectionMatch.bodyEnd());
+        }
+        String suffix = original.endsWith("\n") ? "" : "\n";
+        return original + suffix + fragment.header() + "\n" + normalizeSectionBody(fragment.body());
+    }
+
+    private String mergeSectionBody(String existingBody, String desiredBody) {
+        String rewritten = normalizeSectionBody(existingBody);
+        for (SettingBlock block : parseSettingBlocks(desiredBody)) {
+            rewritten = setOrReplaceSettingBlock(
+                    rewritten,
+                    buildSettingBlockPattern(block.key()),
+                    normalizeSectionBody(block.body())
+            );
+        }
+        return rewritten;
+    }
+
+    private List<SettingBlock> parseSettingBlocks(String sectionBody) {
+        List<SettingBlock> blocks = new ArrayList<>();
+        if (!StringUtils.hasText(sectionBody)) {
+            return blocks;
+        }
+        String normalized = sectionBody.replace("\r\n", "\n");
+        String[] lines = normalized.split("\n", -1);
+        String currentKey = null;
+        StringBuilder currentBody = new StringBuilder();
+        Pattern keyPattern = Pattern.compile("^\\s*([A-Za-z0-9_-]+)\\s*=.*$");
+        for (String line : lines) {
+            Matcher matcher = keyPattern.matcher(line);
+            if (matcher.matches()) {
+                if (currentKey != null) {
+                    blocks.add(new SettingBlock(currentKey, currentBody.toString()));
+                }
+                currentKey = matcher.group(1);
+                currentBody = new StringBuilder().append(line).append('\n');
+                continue;
+            }
+            if (currentKey != null) {
+                currentBody.append(line).append('\n');
+            }
+        }
+        if (currentKey != null) {
+            blocks.add(new SettingBlock(currentKey, currentBody.toString()));
+        }
+        return blocks;
+    }
+
+    private Pattern buildSettingBlockPattern(String key) {
+        return Pattern.compile(
+                "(?ms)^\\s*" + Pattern.quote(key) + "\\s*=.*?(?=^\\s*[A-Za-z0-9_-]+\\s*=|\\z)"
+        );
+    }
+
+    private String normalizeSectionBody(String body) {
+        String normalized = body == null ? "" : body.replace("\r\n", "\n");
+        while (normalized.startsWith("\n")) {
+            normalized = normalized.substring(1);
+        }
+        if (!normalized.isEmpty() && !normalized.endsWith("\n")) {
+            normalized += "\n";
+        }
+        return normalized;
     }
 
     private String setUniqueSettingLine(String section, Pattern linePattern, String replacementLine) {
@@ -1310,6 +1331,12 @@ public class DockerRuntimeService {
     }
 
     private record SectionMatch(int bodyStart, int bodyEnd, String body) {
+    }
+
+    private record RenderedSection(String header, String body) {
+    }
+
+    private record SettingBlock(String key, String body) {
     }
 
     private record CommandResult(int exitCode, String output) {

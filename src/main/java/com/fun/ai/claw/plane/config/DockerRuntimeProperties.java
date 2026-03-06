@@ -34,6 +34,9 @@ public class DockerRuntimeProperties {
     private boolean agentWorkspaceMountReadOnly = true;
     private boolean workspaceAgentsAutoSyncEnabled = true;
     private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
+    private String gatewaySectionFragmentPath = "classpath:zeroclaw-fragments/gateway.toml";
+    private String skillsSectionFragmentPath = "classpath:zeroclaw-fragments/skills.toml";
+    private String delegateAgentSectionFragmentPath = "classpath:zeroclaw-fragments/delegate-agent.toml";
     private boolean delegateAgentProfileEnabled = true;
     private String delegateAgentProfileId = "mgc-novel-to-script";
     private String delegateAgentManifestRelativePath = "zeroclaw-agent.manifest.json";
@@ -258,6 +261,30 @@ public class DockerRuntimeProperties {
 
     public void setWorkspaceAgentsFilePath(String workspaceAgentsFilePath) {
         this.workspaceAgentsFilePath = workspaceAgentsFilePath;
+    }
+
+    public String getGatewaySectionFragmentPath() {
+        return gatewaySectionFragmentPath;
+    }
+
+    public void setGatewaySectionFragmentPath(String gatewaySectionFragmentPath) {
+        this.gatewaySectionFragmentPath = gatewaySectionFragmentPath;
+    }
+
+    public String getSkillsSectionFragmentPath() {
+        return skillsSectionFragmentPath;
+    }
+
+    public void setSkillsSectionFragmentPath(String skillsSectionFragmentPath) {
+        this.skillsSectionFragmentPath = skillsSectionFragmentPath;
+    }
+
+    public String getDelegateAgentSectionFragmentPath() {
+        return delegateAgentSectionFragmentPath;
+    }
+
+    public void setDelegateAgentSectionFragmentPath(String delegateAgentSectionFragmentPath) {
+        this.delegateAgentSectionFragmentPath = delegateAgentSectionFragmentPath;
     }
 
     public boolean isDelegateAgentProfileEnabled() {

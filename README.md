@@ -62,9 +62,11 @@ Docker-related environment variables:
 Notes:
 - `workspace-agents-file-path` should be an absolute container path.
 - If runtime receives empty `agentsMdContent` with overwrite enabled, it will overwrite/clear existing workspace `AGENTS.md` to avoid stale prompts.
-- Plane now best-effort prewarms a delegate profile at `[model_routes.agents."mgc-novel-to-script"]` inside container `config.toml`.
+- Plane now best-effort prewarms a delegate profile at `[agents."mgc-novel-to-script"]` inside container `config.toml`.
 - By default, that profile reuses `default_provider`, `default_model`, and `default_temperature` from the runtime config, so the main agent does not need to call `model_routing_config` just to bootstrap this sub-agent.
 - If you want a dedicated model for the sub-agent, set the `DOCKER_DELEGATE_AGENT_*_OVERRIDE` env vars explicitly.
+- Runtime patch sections are now backed by fragment files under [zeroclaw-fragments/gateway.toml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/zeroclaw-fragments/gateway.toml), [zeroclaw-fragments/skills.toml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/zeroclaw-fragments/skills.toml), and [zeroclaw-fragments/delegate-agent.toml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/zeroclaw-fragments/delegate-agent.toml).
+- Their load paths are configured in [application.yml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/application.yml) under `app.docker.*-fragment-path`.
 
 Recommended (config file first): set these in `src/main/resources/application.yml` under `app.docker`.
 

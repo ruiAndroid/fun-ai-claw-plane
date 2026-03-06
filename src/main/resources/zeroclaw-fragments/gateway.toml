@@ -1,0 +1,4 @@
+[gateway]
+host = "{{gatewayHost}}"
+require_pairing = false
+allow_public_bind = {{allowPublicBind}}

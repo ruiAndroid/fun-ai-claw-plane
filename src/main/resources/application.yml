@@ -49,6 +49,9 @@ app:
     agent-workspace-mount-read-only: true
     workspace-agents-auto-sync-enabled: true
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
+    gateway-section-fragment-path: classpath:zeroclaw-fragments/gateway.toml
+    skills-section-fragment-path: classpath:zeroclaw-fragments/skills.toml
+    delegate-agent-section-fragment-path: classpath:zeroclaw-fragments/delegate-agent.toml
     delegate-agent-profile-enabled: ${DOCKER_DELEGATE_AGENT_PROFILE_ENABLED:true}
     delegate-agent-profile-id: ${DOCKER_DELEGATE_AGENT_PROFILE_ID:mgc-novel-to-script}
     delegate-agent-manifest-relative-path: zeroclaw-agent.manifest.json
