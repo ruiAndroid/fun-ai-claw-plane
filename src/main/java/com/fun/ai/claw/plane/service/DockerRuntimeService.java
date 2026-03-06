@@ -464,6 +464,9 @@ public class DockerRuntimeService {
     }
 
     private void enforceRuntimeConfigPolicy(String containerName, UUID instanceId, Integer gatewayHostPort) {
+        if (!properties.isRuntimeConfigPolicyEnabled()) {
+            return;
+        }
         String openSkillsDir = resolveOpenSkillsDir(
                 instanceId,
                 gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort()

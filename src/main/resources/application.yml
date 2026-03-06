@@ -49,6 +49,7 @@ app:
     agent-workspace-mount-read-only: true
     workspace-agents-auto-sync-enabled: true
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
+    runtime-config-policy-enabled: ${DOCKER_RUNTIME_CONFIG_POLICY_ENABLED:false}
     gateway-section-fragment-path: classpath:zeroclaw-fragments/gateway.toml
     skills-section-fragment-path: classpath:zeroclaw-fragments/skills.toml
     model-route-section-fragment-path: classpath:zeroclaw-fragments/model-route.toml

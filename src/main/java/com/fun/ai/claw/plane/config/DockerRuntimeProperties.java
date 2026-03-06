@@ -34,6 +34,7 @@ public class DockerRuntimeProperties {
     private boolean agentWorkspaceMountReadOnly = true;
     private boolean workspaceAgentsAutoSyncEnabled = true;
     private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
+    private boolean runtimeConfigPolicyEnabled = false;
     private String gatewaySectionFragmentPath = "classpath:zeroclaw-fragments/gateway.toml";
     private String skillsSectionFragmentPath = "classpath:zeroclaw-fragments/skills.toml";
     private String modelRouteSectionFragmentPath = "classpath:zeroclaw-fragments/model-route.toml";
@@ -265,6 +266,14 @@ public class DockerRuntimeProperties {
 
     public void setWorkspaceAgentsFilePath(String workspaceAgentsFilePath) {
         this.workspaceAgentsFilePath = workspaceAgentsFilePath;
+    }
+
+    public boolean isRuntimeConfigPolicyEnabled() {
+        return runtimeConfigPolicyEnabled;
+    }
+
+    public void setRuntimeConfigPolicyEnabled(boolean runtimeConfigPolicyEnabled) {
+        this.runtimeConfigPolicyEnabled = runtimeConfigPolicyEnabled;
     }
 
     public String getGatewaySectionFragmentPath() {
