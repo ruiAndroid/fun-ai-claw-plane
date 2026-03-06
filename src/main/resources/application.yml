@@ -51,11 +51,11 @@ app:
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
     runtime-config-policy-enabled: ${DOCKER_RUNTIME_CONFIG_POLICY_ENABLED:false}
     runtime-config-gateway-section-enabled: ${DOCKER_RUNTIME_CONFIG_GATEWAY_SECTION_ENABLED:true}
-    runtime-config-skills-section-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_SECTION_ENABLED:false}
-    runtime-config-skills-open-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_OPEN_ENABLED:false}
+    runtime-config-skills-section-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_SECTION_ENABLED:true}
+    runtime-config-skills-open-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_OPEN_ENABLED:true}
     runtime-config-skills-dir-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_DIR_ENABLED:true}
-    runtime-config-skills-prompt-injection-mode-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_PROMPT_INJECTION_MODE_ENABLED:false}
-    runtime-config-skills-open-dir-path: ${DOCKER_RUNTIME_CONFIG_SKILLS_OPEN_DIR_PATH:/zeroclaw-data/workspace/skills}
+    runtime-config-skills-prompt-injection-mode-enabled: ${DOCKER_RUNTIME_CONFIG_SKILLS_PROMPT_INJECTION_MODE_ENABLED:true}
+    runtime-config-skills-open-dir-path: ${DOCKER_RUNTIME_CONFIG_SKILLS_OPEN_DIR_PATH:/workspace/agent-mgc-novel-script/skills}
     runtime-config-delegate-agent-section-enabled: ${DOCKER_RUNTIME_CONFIG_DELEGATE_AGENT_SECTION_ENABLED:true}
     runtime-config-model-route-section-enabled: ${DOCKER_RUNTIME_CONFIG_MODEL_ROUTE_SECTION_ENABLED:true}
     runtime-config-query-classification-rule-section-enabled: ${DOCKER_RUNTIME_CONFIG_QUERY_CLASSIFICATION_RULE_SECTION_ENABLED:true}
