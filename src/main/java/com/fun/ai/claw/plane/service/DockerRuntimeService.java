@@ -574,6 +574,7 @@ public class DockerRuntimeService {
                 MODEL_ROUTE_SECTION_PATTERN,
                 fragment,
                 match -> matchesManagedHint(match.body(), delegateAgentProfile.agentId())
+                        || matchesManagedHint(match.body(), LEGACY_NOVEL_SCRIPT_HINT)
         );
     }
 
@@ -716,6 +717,12 @@ public class DockerRuntimeService {
             sectionMatch = matches.get(0);
         }
         String replacement = fragment.header() + "\n" + normalizeSectionBody(fragment.body());
+        for (SectionMatch candidate : matches) {
+            String current = original.substring(candidate.headerStart(), candidate.bodyEnd());
+            if (replacement.equals(current)) {
+                return original;
+            }
+        }
         if (sectionMatch != null) {
             String current = original.substring(sectionMatch.headerStart(), sectionMatch.bodyEnd());
             if (replacement.equals(current)) {
@@ -724,6 +731,14 @@ public class DockerRuntimeService {
             return original.substring(0, sectionMatch.headerStart())
                     + replacement
                     + original.substring(sectionMatch.bodyEnd());
+        }
+        if (!matches.isEmpty()) {
+            SectionMatch lastMatch = matches.get(matches.size() - 1);
+            String prefix = original.substring(0, lastMatch.bodyEnd());
+            String suffix = original.substring(lastMatch.bodyEnd());
+            String normalizedPrefix = prefix.endsWith("\n") ? prefix : prefix + "\n";
+            String normalizedReplacement = replacement.endsWith("\n") ? replacement : replacement + "\n";
+            return normalizedPrefix + normalizedReplacement + suffix;
         }
         String suffix = original.endsWith("\n") ? "" : "\n";
         return original + suffix + replacement;
@@ -808,12 +823,14 @@ public class DockerRuntimeService {
                     List.of(
                             properties.getCommand(),
                             "exec",
+                            "-u",
+                            "0",
                             "-i",
                             containerName,
                             "/bin/busybox",
                             "sh",
                             "-lc",
-                            "cat > /data/zeroclaw/config.toml && chmod 644 /data/zeroclaw/config.toml"
+                            "/bin/busybox cat > /data/zeroclaw/config.toml && /bin/busybox chmod 644 /data/zeroclaw/config.toml"
                     ),
                     (configText == null ? "" : configText).getBytes(StandardCharsets.UTF_8)
             );
@@ -845,6 +862,8 @@ public class DockerRuntimeService {
                 CommandResult chmodResult = runDocker(List.of(
                         properties.getCommand(),
                         "exec",
+                        "-u",
+                        "0",
                         containerName,
                         "/bin/busybox",
                         "chmod",
