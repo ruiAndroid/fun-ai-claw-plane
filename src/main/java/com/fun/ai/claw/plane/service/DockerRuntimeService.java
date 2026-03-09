@@ -39,6 +39,8 @@ public class DockerRuntimeService {
     private static final Logger log = LoggerFactory.getLogger(DockerRuntimeService.class);
     private static final String AGENTS_MD_CONTENT_PAYLOAD_KEY = "agentsMdContent";
     private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
+    private static final String CONFIG_TOML_CONTENT_PAYLOAD_KEY = "configTomlContent";
+    private static final String CONFIG_TOML_OVERWRITE_PAYLOAD_KEY = "configTomlOverwrite";
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
     private static final Pattern REQUIRE_PAIRING_PATTERN =
             Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
@@ -135,10 +137,14 @@ public class DockerRuntimeService {
         Integer gatewayHostPort = resolveGatewayHostPort(payload);
         String agentsMdContent = resolveAgentsMdContent(payload);
         boolean agentsMdOverwrite = resolveAgentsMdOverwrite(payload);
+        String configTomlContent = resolveConfigTomlContent(payload);
+        boolean configTomlOverwrite = resolveConfigTomlOverwrite(payload);
         return switch (action) {
-            case START -> startInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite);
+            case START -> startInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite,
+                    configTomlContent, configTomlOverwrite);
             case STOP -> stopInstance(instanceId);
-            case RESTART, ROLLBACK -> restartInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite);
+            case RESTART, ROLLBACK -> restartInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite,
+                    configTomlContent, configTomlOverwrite);
             case DELETE -> deleteInstance(instanceId);
         };
     }
@@ -218,7 +224,9 @@ public class DockerRuntimeService {
                                  String image,
                                  Integer gatewayHostPort,
                                  String agentsMdContent,
-                                 boolean agentsMdOverwrite) {
+                                 boolean agentsMdOverwrite,
+                                 String configTomlContent,
+                                 boolean configTomlOverwrite) {
         String containerName = containerName(instanceId);
         boolean createdNow = false;
         if (!containerExists(containerName)) {
@@ -230,16 +238,21 @@ public class DockerRuntimeService {
         }
 
         if (containerRunning(containerName)) {
+            boolean configChanged = syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
+            if (configChanged) {
+                runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
+            }
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             return "Container already running: " + containerName;
         }
 
         try {
+            syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+            enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
             if (createdNow) {
@@ -268,7 +281,9 @@ public class DockerRuntimeService {
                                    String image,
                                    Integer gatewayHostPort,
                                    String agentsMdContent,
-                                   boolean agentsMdOverwrite) {
+                                   boolean agentsMdOverwrite,
+                                   String configTomlContent,
+                                   boolean configTomlOverwrite) {
         String containerName = containerName(instanceId);
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
@@ -276,9 +291,10 @@ public class DockerRuntimeService {
             }
             createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
             try {
+                syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
                 enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-                enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+                enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
                 removeContainerQuietly(containerName);
@@ -287,9 +303,10 @@ public class DockerRuntimeService {
             return "Container created and started: " + containerName;
         }
 
+        syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
         enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-        enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort);
+        enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
     }
@@ -494,12 +511,46 @@ public class DockerRuntimeService {
         runDocker(List.of(properties.getCommand(), "rm", containerName));
     }
 
-    private void enforceRuntimeConfigPolicy(String containerName, UUID instanceId, Integer gatewayHostPort) {
+    private boolean syncRuntimeConfigToml(String containerName, String configTomlContent, boolean overwrite) {
+        if (configTomlContent == null) {
+            return false;
+        }
+        String normalizedContent = normalizeConfigText(configTomlContent);
+        String runtimeConfigPath = "/data/zeroclaw/config.toml";
+        if (!overwrite && fileExistsInContainer(containerName, runtimeConfigPath)) {
+            return false;
+        }
+        if (containerRunning(containerName)) {
+            CommandResult read = runDocker(List.of(
+                    properties.getCommand(),
+                    "exec",
+                    containerName,
+                    "/bin/busybox",
+                    "cat",
+                    runtimeConfigPath
+            ));
+            if (read.exitCode == 0 && normalizeConfigText(read.output).equals(normalizedContent)) {
+                return false;
+            }
+        }
+        CommandResult write = writeConfigToContainer(containerName, normalizedContent);
+        if (write.exitCode != 0) {
+            throw new DockerOperationException("failed to write config.toml: " + write.output.trim());
+        }
+        log.info("synced config.toml for {} to {}", containerName, runtimeConfigPath);
+        return true;
+    }
+
+    private void enforceRuntimeConfigPolicy(String containerName,
+                                            UUID instanceId,
+                                            Integer gatewayHostPort,
+                                            boolean authoritativeConfigProvided) {
         boolean enforceGatewaySection = properties.isGatewayRuntimeConfigPatchEnabled() && !properties.isRequirePairing();
-        boolean enforceDelegateAgentSection =
+        boolean enforceDelegateAgentSection = !authoritativeConfigProvided &&
                 properties.isDelegateAgentRuntimeConfigPatchEnabled() && properties.isDelegateAgentProfileEnabled();
-        boolean enforceModelRouteSection = properties.isModelRouteRuntimeConfigPatchEnabled();
-        boolean enforceQueryClassificationRuleSection = properties.isQueryClassificationRuleRuntimeConfigPatchEnabled();
+        boolean enforceModelRouteSection = !authoritativeConfigProvided && properties.isModelRouteRuntimeConfigPatchEnabled();
+        boolean enforceQueryClassificationRuleSection =
+                !authoritativeConfigProvided && properties.isQueryClassificationRuleRuntimeConfigPatchEnabled();
         if (!properties.isAnyRuntimeConfigPatchEnabled()
                 || (!enforceGatewaySection
                 && !enforceDelegateAgentSection
@@ -1658,11 +1709,42 @@ public class DockerRuntimeService {
         return null;
     }
 
+    private String resolveConfigTomlContent(Map<String, Object> payload) {
+        if (payload == null || !payload.containsKey(CONFIG_TOML_CONTENT_PAYLOAD_KEY)) {
+            return null;
+        }
+        Object raw = payload.get(CONFIG_TOML_CONTENT_PAYLOAD_KEY);
+        if (raw instanceof String content) {
+            return normalizeConfigText(content);
+        }
+        return null;
+    }
+
     private boolean resolveAgentsMdOverwrite(Map<String, Object> payload) {
         if (payload == null || !payload.containsKey(AGENTS_MD_OVERWRITE_PAYLOAD_KEY)) {
             return true;
         }
         Object raw = payload.get(AGENTS_MD_OVERWRITE_PAYLOAD_KEY);
+        if (raw instanceof Boolean bool) {
+            return bool;
+        }
+        if (raw instanceof String text && StringUtils.hasText(text)) {
+            String normalized = text.trim().toLowerCase();
+            if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized) || "on".equals(normalized)) {
+                return true;
+            }
+            if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized) || "off".equals(normalized)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean resolveConfigTomlOverwrite(Map<String, Object> payload) {
+        if (payload == null || !payload.containsKey(CONFIG_TOML_OVERWRITE_PAYLOAD_KEY)) {
+            return true;
+        }
+        Object raw = payload.get(CONFIG_TOML_OVERWRITE_PAYLOAD_KEY);
         if (raw instanceof Boolean bool) {
             return bool;
         }
@@ -1798,5 +1880,13 @@ public class DockerRuntimeService {
     }
 
     private record CommandResult(int exitCode, String output) {
+        }
     }
-}
+
+    private String normalizeConfigText(String text) {
+        String normalized = text == null ? "" : text.replace("\r\n", "\n").trim();
+        if (normalized.isEmpty()) {
+            return "";
+        }
+        return normalized + "\n";
+    }
