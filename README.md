@@ -22,6 +22,9 @@ Default port: `8090`
 - `POST /internal/v1/reconcile`
 - `DELETE /internal/v1/instances/{instanceId}`
 - `GET /internal/v1/tasks`
+- `GET /internal/v1/instances/{instanceId}/agents`
+- `GET /internal/v1/instances/{instanceId}/agents/{agentId}/system-prompt`
+- `GET /internal/v1/instances/{instanceId}/skills`
 
 Current implementation executes real Docker commands on host for:
 
@@ -29,6 +32,7 @@ Current implementation executes real Docker commands on host for:
 - `STOP`: stop container
 - `RESTART`/`ROLLBACK`: restart container (or create+start if absent)
 - `DELETE`: stop container gracefully, then remove container
+- Runtime inspection: read `config.toml`, enumerate agents, and enumerate skills from the target container
 
 Container name pattern: `${DOCKER_CONTAINER_PREFIX}-${instanceId}` (default prefix: `funclaw`).
 
