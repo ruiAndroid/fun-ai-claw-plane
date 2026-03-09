@@ -143,6 +143,77 @@ public class DockerRuntimeService {
         };
     }
 
+    public boolean isInstanceContainerPresent(UUID instanceId) {
+        return containerExists(containerName(instanceId));
+    }
+
+    public boolean isInstanceContainerRunning(UUID instanceId) {
+        return containerRunning(containerName(instanceId));
+    }
+
+    public Integer resolveInstanceGatewayHostPort(UUID instanceId) {
+        return resolveGatewayHostPortForProbe(containerName(instanceId), null);
+    }
+
+    public String resolveGatewayPublicUrl(UUID instanceId, Integer gatewayHostPort) {
+        int resolvedPort = gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort();
+        return resolveTemplate(properties.getGatewayPublicUrlTemplate(), instanceId, resolvedPort);
+    }
+
+    public String resolveGatewayConfigPath(UUID instanceId, Integer gatewayHostPort) {
+        int resolvedPort = gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort();
+        String configDir = resolveTemplate(properties.getGatewayConfigDirTemplate(), instanceId, resolvedPort);
+        return joinContainerPath(configDir, "config.toml");
+    }
+
+    public String readTextFileIfPresent(UUID instanceId, String path) {
+        String normalizedPath = requireAbsolutePath(path);
+        CommandResult result = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName(instanceId),
+                "/bin/busybox",
+                "cat",
+                normalizedPath
+        ));
+        if (result.exitCode != 0) {
+            return null;
+        }
+        return result.output;
+    }
+
+    public void writeFile(UUID instanceId, String path, byte[] content, boolean overwrite) {
+        String normalizedPath = requireAbsolutePath(path);
+        String containerName = containerName(instanceId);
+        String parentDir = parentDirOf(normalizedPath);
+        if (!StringUtils.hasText(parentDir)) {
+            throw new IllegalArgumentException("file path must have a parent directory");
+        }
+        if (!overwrite && fileExistsInContainer(containerName, normalizedPath)) {
+            return;
+        }
+
+        byte[] bytes = content == null ? new byte[0] : content;
+        String commandScript = "/bin/busybox mkdir -p " + shellQuote(parentDir)
+                + " && /bin/busybox dd of=" + shellQuote(normalizedPath) + " conv=fsync";
+        CommandResult write = runDockerWithInput(
+                List.of(
+                        properties.getCommand(),
+                        "exec",
+                        "-i",
+                        containerName,
+                        "/bin/busybox",
+                        "sh",
+                        "-lc",
+                        commandScript
+                ),
+                bytes
+        );
+        if (write.exitCode != 0) {
+            throw new DockerOperationException("failed to write file " + normalizedPath + ": " + write.output.trim());
+        }
+    }
+
     private String startInstance(UUID instanceId,
                                  String image,
                                  Integer gatewayHostPort,
@@ -1666,6 +1737,17 @@ public class DockerRuntimeService {
                 path
         ));
         return result.exitCode == 0;
+    }
+
+    private String requireAbsolutePath(String path) {
+        if (!StringUtils.hasText(path)) {
+            throw new IllegalArgumentException("file path must not be blank");
+        }
+        String normalizedPath = path.trim();
+        if (!normalizedPath.startsWith("/")) {
+            throw new IllegalArgumentException("file path must be absolute");
+        }
+        return normalizedPath;
     }
 
     private String parentDirOf(String path) {

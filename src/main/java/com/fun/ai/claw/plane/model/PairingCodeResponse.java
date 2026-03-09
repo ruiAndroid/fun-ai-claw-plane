@@ -1,0 +1,14 @@
+package com.fun.ai.claw.plane.model;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public record PairingCodeResponse(
+        UUID instanceId,
+        String pairingCode,
+        String pairingLink,
+        String sourceLine,
+        String note,
+        Instant fetchedAt
+) {
+}

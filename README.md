@@ -25,6 +25,11 @@ Default port: `8090`
 - `GET /internal/v1/instances/{instanceId}/agents`
 - `GET /internal/v1/instances/{instanceId}/agents/{agentId}/system-prompt`
 - `GET /internal/v1/instances/{instanceId}/skills`
+- `GET /internal/v1/instances/{instanceId}/pairing-code`
+- `GET /internal/v1/instances/{instanceId}/files?path=<absolute-container-path>`
+- `PUT /internal/v1/instances/{instanceId}/files?path=<absolute-container-path>&overwrite=true`
+- `WS /internal/v1/agent-session/ws?instanceId=<uuid>&agentId=<optional-agent-id>`
+- `WS /internal/v1/terminal/ws?instanceId=<uuid>`
 
 Current implementation executes real Docker commands on host for:
 
@@ -33,6 +38,7 @@ Current implementation executes real Docker commands on host for:
 - `RESTART`/`ROLLBACK`: restart container (or create+start if absent)
 - `DELETE`: stop container gracefully, then remove container
 - Runtime inspection: read `config.toml`, enumerate agents, and enumerate skills from the target container
+- Runtime interaction: resolve pairing code, read/write runtime config files, host agent-session websocket, and host terminal websocket
 
 Container name pattern: `${DOCKER_CONTAINER_PREFIX}-${instanceId}` (default prefix: `funclaw`).
 
@@ -62,6 +68,12 @@ Docker-related environment variables:
 - `ZEROCLAW_API_KEY` (default: empty)
 - `DOCKER_STOP_TIMEOUT_SECONDS` (default: `20`)
 - `DOCKER_COMMAND_TIMEOUT_SECONDS` (default: `120`)
+- `AGENT_SESSION_COMMAND` (default: `zeroclaw agent --config-dir /data/zeroclaw`)
+- `AGENT_SESSION_LANG` / `AGENT_SESSION_LC_ALL`
+- `AGENT_SESSION_RUST_LOG`
+- `AGENT_SESSION_PROCESS_SHUTDOWN_TIMEOUT_SECONDS`
+- `TERMINAL_SHELL` (default: `/bin/busybox sh`)
+- `TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS`
 
 Notes:
 - `workspace-agents-file-path` should be an absolute container path.
@@ -69,6 +81,7 @@ Notes:
 - Plane now best-effort prewarms a delegate profile at `[agents."mgc-novel-to-script"]` inside container `config.toml`.
 - By default, that profile reuses `default_provider`, `default_model`, and `default_temperature` from the runtime config, so the main agent does not need to call `model_routing_config` just to bootstrap this sub-agent.
 - If you want a dedicated model for the sub-agent, set the `DOCKER_DELEGATE_AGENT_*_OVERRIDE` env vars explicitly.
+- API host no longer needs local Docker access for pairing code, agent-session, terminal, or UI-controller config fallback; those runtime-touching actions are now served by plane.
 - Runtime patch sections are now backed by fragment files under [zeroclaw-fragments/gateway.toml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/zeroclaw-fragments/gateway.toml), [zeroclaw-fragments/model-route.toml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/zeroclaw-fragments/model-route.toml), [zeroclaw-fragments/query-classification-rule.toml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/zeroclaw-fragments/query-classification-rule.toml), and [zeroclaw-fragments/delegate-agent.toml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/zeroclaw-fragments/delegate-agent.toml).
 - Their load paths are configured in [application.yml](/D:/dev/AI/AIPro/fun-ai-claw/fun-ai-claw-plane/src/main/resources/application.yml) under `app.docker.*-fragment-path`.
 

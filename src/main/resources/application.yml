@@ -68,3 +68,25 @@ app:
     api-key: ${ZEROCLAW_API_KEY:}
     stop-timeout-seconds: ${DOCKER_STOP_TIMEOUT_SECONDS:20}
     command-timeout-seconds: ${DOCKER_COMMAND_TIMEOUT_SECONDS:120}
+  pairing-code:
+    fixed-code: ""
+    fixed-link-path: /
+    gateway-probe-scheme: http
+    gateway-probe-host: ""
+    gateway-config-path: ""
+    auto-auth-query-param: autoAuth
+    auth-token-query-param: authToken
+    auth-probe-timeout-seconds: 5
+  agent-session:
+    docker-command: ${AGENT_SESSION_DOCKER_COMMAND:${DOCKER_CMD:docker}}
+    container-prefix: ${AGENT_SESSION_CONTAINER_PREFIX:${DOCKER_CONTAINER_PREFIX:funclaw}}
+    command: ${AGENT_SESSION_COMMAND:zeroclaw agent --config-dir /data/zeroclaw}
+    lang: ${AGENT_SESSION_LANG:C.UTF-8}
+    lc-all: ${AGENT_SESSION_LC_ALL:C.UTF-8}
+    rust-log: ${AGENT_SESSION_RUST_LOG:info}
+    process-shutdown-timeout-seconds: ${AGENT_SESSION_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:4}
+  terminal:
+    docker-command: ${TERMINAL_DOCKER_COMMAND:${DOCKER_CMD:docker}}
+    container-prefix: ${TERMINAL_CONTAINER_PREFIX:${DOCKER_CONTAINER_PREFIX:funclaw}}
+    shell: ${TERMINAL_SHELL:/bin/busybox sh}
+    process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
