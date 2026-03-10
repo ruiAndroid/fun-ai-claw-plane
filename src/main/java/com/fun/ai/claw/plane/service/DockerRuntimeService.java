@@ -372,6 +372,8 @@ public class DockerRuntimeService {
             command.add("--restart");
             command.add(properties.getRestartPolicy().trim());
         }
+        command.add("--ulimit");
+        command.add("nofile=65536:65536");
         appendAgentWorkspaceMountArgs(command, instanceId, hostPort);
         command.add(image);
         command.add("gateway");
