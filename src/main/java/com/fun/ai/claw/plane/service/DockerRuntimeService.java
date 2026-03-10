@@ -66,6 +66,8 @@ public class DockerRuntimeService {
             Pattern.compile("(?m)^\\s*provider\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern DELEGATE_MODEL_PATTERN =
             Pattern.compile("(?m)^\\s*model\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
+    private static final Pattern DELEGATE_API_KEY_PATTERN =
+            Pattern.compile("(?m)^\\s*api_key\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern DELEGATE_TEMPERATURE_PATTERN =
             Pattern.compile("(?m)^\\s*temperature\\s*=\\s*([-+]?[0-9]+(?:\\.[0-9]+)?)\\s*$");
     private static final Pattern MAX_ITERATIONS_PATTERN =
@@ -659,18 +661,29 @@ public class DockerRuntimeService {
             return null;
         }
 
+        SectionMatch delegateAgentSection = findDelegateAgentSection(original, delegateAgentId);
+        SectionMatch managedModelRouteSection = findManagedModelRouteSection(original, delegateAgentId);
         String resolvedProvider = firstNonBlank(
                 properties.getDelegateAgentProviderOverride(),
+                delegateAgentSection == null ? null : findStringValue(DELEGATE_PROVIDER_PATTERN, delegateAgentSection.body()),
+                managedModelRouteSection == null ? null : findStringValue(DELEGATE_PROVIDER_PATTERN, managedModelRouteSection.body()),
                 findStringValue(DEFAULT_PROVIDER_PATTERN, original)
         );
         String resolvedModel = firstNonBlank(
                 properties.getDelegateAgentModelOverride(),
+                delegateAgentSection == null ? null : findStringValue(DELEGATE_MODEL_PATTERN, delegateAgentSection.body()),
+                managedModelRouteSection == null ? null : findStringValue(DELEGATE_MODEL_PATTERN, managedModelRouteSection.body()),
                 findStringValue(DEFAULT_MODEL_PATTERN, original)
         );
         String resolvedTemperature = firstNonBlank(
                 properties.getDelegateAgentTemperatureOverride(),
+                delegateAgentSection == null ? null : findNumericValue(DELEGATE_TEMPERATURE_PATTERN, delegateAgentSection.body()),
+                managedModelRouteSection == null ? null : findNumericValue(DELEGATE_TEMPERATURE_PATTERN, managedModelRouteSection.body()),
                 findNumericValue(DEFAULT_TEMPERATURE_PATTERN, original)
         );
+        String resolvedRouteApiKey = managedModelRouteSection == null
+                ? null
+                : findStringValue(DELEGATE_API_KEY_PATTERN, managedModelRouteSection.body());
 
         if (!StringUtils.hasText(resolvedProvider) || !StringUtils.hasText(resolvedModel)) {
             log.warn("skip delegate agent profile enforcement for {}: unable to resolve provider/model from config.toml",
@@ -678,11 +691,13 @@ public class DockerRuntimeService {
             return null;
         }
         String normalizedTemperature = StringUtils.hasText(resolvedTemperature) ? resolvedTemperature.trim() : null;
+        String normalizedRouteApiKey = StringUtils.hasText(resolvedRouteApiKey) ? resolvedRouteApiKey.trim() : null;
         return new DelegateAgentProfileSpec(
                 delegateAgentId,
                 resolvedProvider.trim(),
                 resolvedModel.trim(),
-                normalizedTemperature
+                normalizedTemperature,
+                normalizedRouteApiKey
         );
     }
 
@@ -697,16 +712,22 @@ public class DockerRuntimeService {
                         "delegateAgentId", escapeTomlString(delegateAgentProfile.agentId()),
                         "delegateProvider", escapeTomlString(delegateAgentProfile.provider()),
                         "delegateModel", escapeTomlString(delegateAgentProfile.model()),
-                        "delegateTemperatureLine", buildTemperatureLine(delegateAgentProfile.temperature())
+                        "delegateRouteApiKeyLine", buildQuotedStringLine("api_key", delegateAgentProfile.routeApiKey())
                 )
         );
-        return mergeArraySection(
-                original,
-                MODEL_ROUTE_SECTION_PATTERN,
-                fragment,
-                match -> matchesManagedHint(match.body(), delegateAgentProfile.agentId())
-                        || matchesManagedHint(match.body(), LEGACY_NOVEL_SCRIPT_HINT)
-        );
+        SectionMatch sectionMatch = findManagedModelRouteSection(original, delegateAgentProfile.agentId());
+        if (sectionMatch != null) {
+            String sectionBody = removeSettingBlocks(sectionMatch.body(), Set.of("temperature"));
+            String rewrittenSection = mergeSectionBody(sectionBody, fragment.body());
+            if (rewrittenSection.equals(normalizeSectionBody(sectionMatch.body()))) {
+                return original;
+            }
+            return original.substring(0, sectionMatch.bodyStart())
+                    + rewrittenSection
+                    + original.substring(sectionMatch.bodyEnd());
+        }
+        String suffix = original.endsWith("\n") ? "" : "\n";
+        return original + suffix + fragment.header() + "\n" + normalizeSectionBody(fragment.body());
     }
 
     private String rewriteQueryClassificationRuleSettings(String config, DelegateAgentProfileSpec delegateAgentProfile) {
@@ -1093,6 +1114,12 @@ public class DockerRuntimeService {
         return StringUtils.hasText(temperature) ? "temperature = " + temperature.trim() : "";
     }
 
+    private String buildQuotedStringLine(String key, String value) {
+        return StringUtils.hasText(key) && StringUtils.hasText(value)
+                ? key.trim() + " = \"" + escapeTomlString(value.trim()) + "\""
+                : "";
+    }
+
     private boolean matchesManagedHint(String sectionBody, String delegateAgentId) {
         String hint = findStringValue(HINT_PATTERN, sectionBody);
         if (!StringUtils.hasText(hint)) {
@@ -1264,6 +1291,16 @@ public class DockerRuntimeService {
             return directAgentSection;
         }
         return findSection(config, buildModelRoutesAgentSectionPattern(delegateAgentId));
+    }
+
+    private SectionMatch findManagedModelRouteSection(String config, String delegateAgentId) {
+        List<SectionMatch> matches = findSections(config, MODEL_ROUTE_SECTION_PATTERN);
+        for (SectionMatch candidate : matches) {
+            if (matchesManagedHint(candidate.body(), delegateAgentId)) {
+                return candidate;
+            }
+        }
+        return matches.size() == 1 ? matches.get(0) : null;
     }
 
     private SectionMatch findSection(String config, Pattern sectionPattern) {
@@ -1854,7 +1891,11 @@ public class DockerRuntimeService {
         return properties.getContainerPrefix() + "-" + instanceId;
     }
 
-    private record DelegateAgentProfileSpec(String agentId, String provider, String model, String temperature) {
+    private record DelegateAgentProfileSpec(String agentId,
+                                            String provider,
+                                            String model,
+                                            String temperature,
+                                            String routeApiKey) {
     }
 
     private record DelegateAgentManifestSpec(String agentId,
