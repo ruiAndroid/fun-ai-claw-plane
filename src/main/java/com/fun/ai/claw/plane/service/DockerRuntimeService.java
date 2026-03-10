@@ -1880,7 +1880,6 @@ public class DockerRuntimeService {
     }
 
     private record CommandResult(int exitCode, String output) {
-        }
     }
 
     private String normalizeConfigText(String text) {
