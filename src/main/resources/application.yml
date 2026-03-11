@@ -8,15 +8,6 @@
 spring:
   application:
     name: fun-ai-claw-plane
-  datasource:
-    url: "jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5432}/fun_ai_claw"
-    username: "${DB_USER:funai_agent}"
-    password: "${DB_PASSWORD:Ss123456!}"
-    driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
-      connection-timeout: 10000
 
 management:
   endpoints:

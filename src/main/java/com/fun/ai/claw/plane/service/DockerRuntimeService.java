@@ -3,7 +3,6 @@ package com.fun.ai.claw.plane.service;
 import com.fun.ai.claw.plane.config.DockerRuntimeProperties;
 import com.fun.ai.claw.plane.model.CommandAction;
 import com.fun.ai.claw.plane.model.ManagedSkillAssetRecord;
-import com.fun.ai.claw.plane.repository.ManagedSkillAssetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
@@ -45,6 +44,7 @@ public class DockerRuntimeService {
     private static final String AGENTS_MD_OVERWRITE_PAYLOAD_KEY = "agentsMdOverwrite";
     private static final String CONFIG_TOML_CONTENT_PAYLOAD_KEY = "configTomlContent";
     private static final String CONFIG_TOML_OVERWRITE_PAYLOAD_KEY = "configTomlOverwrite";
+    private static final String MANAGED_SKILLS_PAYLOAD_KEY = "managedSkills";
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
     private static final Pattern REQUIRE_PAIRING_PATTERN =
             Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
@@ -123,16 +123,13 @@ public class DockerRuntimeService {
     );
     private final DockerRuntimeProperties properties;
     private final ResourceLoader resourceLoader;
-    private final ManagedSkillAssetRepository managedSkillAssetRepository;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
     private final HttpClient healthProbeClient;
 
     public DockerRuntimeService(DockerRuntimeProperties properties,
-                                ResourceLoader resourceLoader,
-                                ManagedSkillAssetRepository managedSkillAssetRepository) {
+                                ResourceLoader resourceLoader) {
         this.properties = properties;
         this.resourceLoader = resourceLoader;
-        this.managedSkillAssetRepository = managedSkillAssetRepository;
         this.healthProbeClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
@@ -149,12 +146,13 @@ public class DockerRuntimeService {
         boolean agentsMdOverwrite = resolveAgentsMdOverwrite(payload);
         String configTomlContent = resolveConfigTomlContent(payload);
         boolean configTomlOverwrite = resolveConfigTomlOverwrite(payload);
+        List<ManagedSkillAssetRecord> managedSkillAssets = resolveManagedSkillAssets(payload);
         return switch (action) {
             case START -> startInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite,
-                    configTomlContent, configTomlOverwrite);
+                    configTomlContent, configTomlOverwrite, managedSkillAssets);
             case STOP -> stopInstance(instanceId);
             case RESTART, ROLLBACK -> restartInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite,
-                    configTomlContent, configTomlOverwrite);
+                    configTomlContent, configTomlOverwrite, managedSkillAssets);
             case DELETE -> deleteInstance(instanceId);
         };
     }
@@ -230,13 +228,14 @@ public class DockerRuntimeService {
         }
     }
 
-    public void syncManagedSkills(UUID instanceId) {
-        materializeManagedSkillsHostDir(instanceId, null);
+    public void syncManagedSkills(UUID instanceId, List<ManagedSkillAssetRecord> managedSkillAssets) {
+        List<ManagedSkillAssetRecord> normalizedAssets = normalizeManagedSkillAssets(managedSkillAssets);
+        materializeManagedSkillsHostDir(instanceId, null, normalizedAssets);
         String containerName = containerName(instanceId);
         if (!containerExists(containerName) || !containerRunning(containerName)) {
             return;
         }
-        syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
+        syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName, normalizedAssets);
     }
 
     private String startInstance(UUID instanceId,
@@ -245,9 +244,11 @@ public class DockerRuntimeService {
                                  String agentsMdContent,
                                  boolean agentsMdOverwrite,
                                  String configTomlContent,
-                                 boolean configTomlOverwrite) {
+                                 boolean configTomlOverwrite,
+                                 List<ManagedSkillAssetRecord> managedSkillAssets) {
         String containerName = containerName(instanceId);
-        materializeManagedSkillsHostDir(instanceId, gatewayHostPort);
+        List<ManagedSkillAssetRecord> normalizedAssets = normalizeManagedSkillAssets(managedSkillAssets);
+        materializeManagedSkillsHostDir(instanceId, gatewayHostPort, normalizedAssets);
         boolean createdNow = false;
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
@@ -272,7 +273,7 @@ public class DockerRuntimeService {
             syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-            syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
+            syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName, normalizedAssets);
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
@@ -304,9 +305,11 @@ public class DockerRuntimeService {
                                    String agentsMdContent,
                                    boolean agentsMdOverwrite,
                                    String configTomlContent,
-                                   boolean configTomlOverwrite) {
+                                   boolean configTomlOverwrite,
+                                   List<ManagedSkillAssetRecord> managedSkillAssets) {
         String containerName = containerName(instanceId);
-        materializeManagedSkillsHostDir(instanceId, gatewayHostPort);
+        List<ManagedSkillAssetRecord> normalizedAssets = normalizeManagedSkillAssets(managedSkillAssets);
+        materializeManagedSkillsHostDir(instanceId, gatewayHostPort, normalizedAssets);
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
                 throw new DockerOperationException("image is required to create container for restart");
@@ -316,7 +319,7 @@ public class DockerRuntimeService {
                 syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
                 enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-                syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
+                syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName, normalizedAssets);
                 enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
@@ -329,7 +332,7 @@ public class DockerRuntimeService {
         syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
         enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
-        syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
+        syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName, normalizedAssets);
         enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
@@ -446,14 +449,16 @@ public class DockerRuntimeService {
         command.add(mountExpr);
     }
 
-    private void materializeManagedSkillsHostDir(UUID instanceId, Integer gatewayHostPort) {
+    private void materializeManagedSkillsHostDir(UUID instanceId,
+                                                 Integer gatewayHostPort,
+                                                 List<ManagedSkillAssetRecord> managedSkillAssets) {
         String hostPath = resolveManagedSkillsHostPath(instanceId, gatewayHostPort);
         if (!StringUtils.hasText(hostPath)) {
             log.warn("skip managed skills materialization because host path is blank");
             return;
         }
         try {
-            reconcileManagedSkillsDirectory(Path.of(hostPath.trim()), loadManagedSkillAssets(instanceId));
+            reconcileManagedSkillsDirectory(Path.of(hostPath.trim()), normalizeManagedSkillAssets(managedSkillAssets));
         } catch (IOException ex) {
             throw new DockerOperationException("failed to materialize managed skills for " + instanceId + ": " + ex.getMessage(), ex);
         }
@@ -480,10 +485,6 @@ public class DockerRuntimeService {
         return StringUtils.hasText(properties.getInstanceSkillsContainerPath())
                 ? properties.getInstanceSkillsContainerPath().trim()
                 : "/workspace/skills";
-    }
-
-    private List<ManagedSkillAssetRecord> loadManagedSkillAssets(UUID instanceId) {
-        return managedSkillAssetRepository.findEnabledByInstanceId(instanceId);
     }
 
     private void reconcileManagedSkillsDirectory(Path rootDir, List<ManagedSkillAssetRecord> assets) throws IOException {
@@ -529,7 +530,9 @@ public class DockerRuntimeService {
         }
     }
 
-    private void syncManagedSkillsIntoRunningContainerIfNeeded(UUID instanceId, String containerName) {
+    private void syncManagedSkillsIntoRunningContainerIfNeeded(UUID instanceId,
+                                                               String containerName,
+                                                               List<ManagedSkillAssetRecord> managedSkillAssets) {
         if (!containerRunning(containerName)) {
             return;
         }
@@ -537,7 +540,12 @@ public class DockerRuntimeService {
         if (containerHasMountDestination(containerName, managedSkillsContainerPath)) {
             return;
         }
-        syncManagedSkillsIntoContainer(instanceId, containerName, managedSkillsContainerPath, loadManagedSkillAssets(instanceId));
+        syncManagedSkillsIntoContainer(
+                instanceId,
+                containerName,
+                managedSkillsContainerPath,
+                normalizeManagedSkillAssets(managedSkillAssets)
+        );
     }
 
     private boolean containerHasMountDestination(String containerName, String destinationPath) {
@@ -1990,6 +1998,55 @@ public class DockerRuntimeService {
             return normalizeConfigText(content);
         }
         return null;
+    }
+
+    private List<ManagedSkillAssetRecord> resolveManagedSkillAssets(Map<String, Object> payload) {
+        if (payload == null || !payload.containsKey(MANAGED_SKILLS_PAYLOAD_KEY)) {
+            return List.of();
+        }
+        Object raw = payload.get(MANAGED_SKILLS_PAYLOAD_KEY);
+        if (!(raw instanceof List<?> rawList)) {
+            return List.of();
+        }
+        List<ManagedSkillAssetRecord> resolved = new ArrayList<>();
+        for (Object item : rawList) {
+            if (item instanceof ManagedSkillAssetRecord assetRecord) {
+                resolved.add(assetRecord);
+                continue;
+            }
+            if (!(item instanceof Map<?, ?> itemMap)) {
+                continue;
+            }
+            String skillKey = valueAsString(itemMap.get("skillKey"));
+            String skillMd = valueAsString(itemMap.get("skillMd"));
+            resolved.add(new ManagedSkillAssetRecord(skillKey, skillMd));
+        }
+        return normalizeManagedSkillAssets(resolved);
+    }
+
+    private List<ManagedSkillAssetRecord> normalizeManagedSkillAssets(List<ManagedSkillAssetRecord> managedSkillAssets) {
+        if (managedSkillAssets == null || managedSkillAssets.isEmpty()) {
+            return List.of();
+        }
+        Map<String, ManagedSkillAssetRecord> normalized = new java.util.LinkedHashMap<>();
+        for (ManagedSkillAssetRecord asset : managedSkillAssets) {
+            if (asset == null || !StringUtils.hasText(asset.skillKey())) {
+                continue;
+            }
+            String skillKey = asset.skillKey().trim();
+            normalized.put(skillKey, new ManagedSkillAssetRecord(skillKey, asset.skillMd() == null ? "" : asset.skillMd()));
+        }
+        return List.copyOf(normalized.values());
+    }
+
+    private String valueAsString(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof String text) {
+            return text;
+        }
+        return String.valueOf(value);
     }
 
     private boolean resolveAgentsMdOverwrite(Map<String, Object> payload) {

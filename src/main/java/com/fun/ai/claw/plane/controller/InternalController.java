@@ -4,6 +4,7 @@ import com.fun.ai.claw.plane.model.AgentDescriptorResponse;
 import com.fun.ai.claw.plane.model.AgentSystemPromptResponse;
 import com.fun.ai.claw.plane.model.HealthResponse;
 import com.fun.ai.claw.plane.model.ListResponse;
+import com.fun.ai.claw.plane.model.ManagedSkillSyncRequest;
 import com.fun.ai.claw.plane.model.PairingCodeResponse;
 import com.fun.ai.claw.plane.model.ReconcileCommandRequest;
 import com.fun.ai.claw.plane.model.SkillDescriptorResponse;
@@ -94,8 +95,9 @@ public class InternalController {
 
     @PostMapping("/instances/{instanceId}/skills/sync")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void syncManagedSkills(@PathVariable UUID instanceId) {
-        dockerRuntimeService.syncManagedSkills(instanceId);
+    public void syncManagedSkills(@PathVariable UUID instanceId,
+                                  @RequestBody(required = false) ManagedSkillSyncRequest request) {
+        dockerRuntimeService.syncManagedSkills(instanceId, request == null ? null : request.items());
     }
 
     @GetMapping("/instances/{instanceId}/pairing-code")
