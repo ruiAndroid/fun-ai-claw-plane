@@ -1,4 +1,4 @@
-﻿package com.fun.ai.claw.plane.service;
+package com.fun.ai.claw.plane.service;
 
 import com.fun.ai.claw.plane.config.DockerRuntimeProperties;
 import com.fun.ai.claw.plane.model.CommandAction;
@@ -105,12 +105,12 @@ public class DockerRuntimeService {
             "max_iterations"
     );
     private static final Set<String> NOVEL_SCRIPT_RULE_KEYWORDS = Set.of(
-            "灏忚杞墽鏈?,
-            "涓€鍙ヨ瘽鍓ф湰",
-            "鍓ф湰",
-            "鍒嗛泦澶х翰",
-            "鏁呬簨姊楁",
-            "瑙掕壊璁惧畾"
+            "小说转剧本",
+            "一句话剧本",
+            "剧本",
+            "分集大纲",
+            "故事梗概",
+            "角色设定"
     );
     private static final Set<String> NOVEL_SCRIPT_RULE_LITERALS = Set.of(
             "script_type=",
