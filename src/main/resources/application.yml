@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8090
   tomcat:
     threads:
@@ -64,7 +64,7 @@ app:
     delegate-agent-section-fragment-path: classpath:zeroclaw-fragments/delegate-agent.toml
     delegate-agent-profile-enabled: ${DOCKER_DELEGATE_AGENT_PROFILE_ENABLED:true}
     delegate-agent-profile-id: ${DOCKER_DELEGATE_AGENT_PROFILE_ID:mgc-novel-to-script}
-    delegate-agent-manifest-relative-path: zeroclaw-agent.manifest.json
+    delegate-agent-manifest-relative-path: agent.minifest.json
     delegate-agent-provider-override: ${DOCKER_DELEGATE_AGENT_PROVIDER_OVERRIDE:}
     delegate-agent-model-override: ${DOCKER_DELEGATE_AGENT_MODEL_OVERRIDE:}
     delegate-agent-temperature-override: ${DOCKER_DELEGATE_AGENT_TEMPERATURE_OVERRIDE:}
@@ -94,3 +94,5 @@ app:
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:${DOCKER_CONTAINER_PREFIX:funclaw}}
     shell: ${TERMINAL_SHELL:/bin/busybox sh}
     process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
+
+

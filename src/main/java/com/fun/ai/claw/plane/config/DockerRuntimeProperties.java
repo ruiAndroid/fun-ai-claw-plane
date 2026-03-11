@@ -1,4 +1,4 @@
-package com.fun.ai.claw.plane.config;
+﻿package com.fun.ai.claw.plane.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -46,7 +46,7 @@ public class DockerRuntimeProperties {
     private String delegateAgentSectionFragmentPath = "classpath:zeroclaw-fragments/delegate-agent.toml";
     private boolean delegateAgentProfileEnabled = true;
     private String delegateAgentProfileId = "mgc-novel-to-script";
-    private String delegateAgentManifestRelativePath = "zeroclaw-agent.manifest.json";
+    private String delegateAgentManifestRelativePath = "agent.minifest.json";
     private String delegateAgentProviderOverride = "";
     private String delegateAgentModelOverride = "";
     private String delegateAgentTemperatureOverride = "";
@@ -447,3 +447,5 @@ public class DockerRuntimeProperties {
         this.commandTimeoutSeconds = commandTimeoutSeconds;
     }
 }
+
+
