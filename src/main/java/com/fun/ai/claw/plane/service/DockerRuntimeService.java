@@ -235,6 +235,11 @@ public class DockerRuntimeService {
         if (!containerExists(containerName) || !containerRunning(containerName)) {
             return;
         }
+        if (requiresManagedSkillsMountUpgrade(containerName)) {
+            log.info("defer in-container managed skill sync for legacy container {} because {} mount is missing; restart is required",
+                    containerName, normalizeManagedSkillsContainerPath());
+            return;
+        }
         syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName, normalizedAssets);
     }
 
@@ -250,6 +255,10 @@ public class DockerRuntimeService {
         List<ManagedSkillAssetRecord> normalizedAssets = normalizeManagedSkillAssets(managedSkillAssets);
         materializeManagedSkillsHostDir(instanceId, gatewayHostPort, normalizedAssets);
         boolean createdNow = false;
+        if (containerExists(containerName) && requiresManagedSkillsMountUpgrade(containerName)) {
+            recreateContainerWithManagedSkillsMount(containerName, instanceId, image, gatewayHostPort);
+            createdNow = true;
+        }
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
                 throw new DockerOperationException("image is required to create container");
@@ -310,11 +319,18 @@ public class DockerRuntimeService {
         String containerName = containerName(instanceId);
         List<ManagedSkillAssetRecord> normalizedAssets = normalizeManagedSkillAssets(managedSkillAssets);
         materializeManagedSkillsHostDir(instanceId, gatewayHostPort, normalizedAssets);
-        if (!containerExists(containerName)) {
+        boolean recreatedNow = false;
+        if (containerExists(containerName) && requiresManagedSkillsMountUpgrade(containerName)) {
+            recreateContainerWithManagedSkillsMount(containerName, instanceId, image, gatewayHostPort);
+            recreatedNow = true;
+        }
+        if (!containerExists(containerName) || recreatedNow) {
             if (!StringUtils.hasText(image)) {
                 throw new DockerOperationException("image is required to create container for restart");
             }
-            createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
+            if (!recreatedNow) {
+                createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
+            }
             try {
                 syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
@@ -326,7 +342,9 @@ public class DockerRuntimeService {
                 removeContainerQuietly(containerName);
                 throw ex;
             }
-            return "Container created and started: " + containerName;
+            return recreatedNow
+                    ? "Container recreated and started: " + containerName
+                    : "Container created and started: " + containerName;
         }
 
         syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
@@ -336,6 +354,28 @@ public class DockerRuntimeService {
         enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
+    }
+
+    private boolean requiresManagedSkillsMountUpgrade(String containerName) {
+        if (!properties.isInstanceSkillsMountEnabled() || !containerExists(containerName)) {
+            return false;
+        }
+        return !containerHasMountDestination(containerName, normalizeManagedSkillsContainerPath());
+    }
+
+    private void recreateContainerWithManagedSkillsMount(String containerName,
+                                                         UUID instanceId,
+                                                         String image,
+                                                         Integer gatewayHostPort) {
+        String effectiveImage = StringUtils.hasText(image) ? image.trim() : inspectContainerImage(containerName);
+        if (!StringUtils.hasText(effectiveImage)) {
+            throw new DockerOperationException("image is required to recreate legacy container with managed skills mount");
+        }
+        if (containerRunning(containerName)) {
+            runDockerChecked(List.of(properties.getCommand(), "stop", containerName), "failed to stop legacy container");
+        }
+        runDockerChecked(List.of(properties.getCommand(), "rm", containerName), "failed to remove legacy container");
+        createContainer(containerName, instanceId, effectiveImage, gatewayHostPort);
     }
 
     private String deleteInstance(UUID instanceId) {
@@ -565,6 +605,20 @@ public class DockerRuntimeService {
         return inspect.output.lines()
                 .map(String::trim)
                 .anyMatch(destinationPath::equals);
+    }
+
+    private String inspectContainerImage(String containerName) {
+        CommandResult inspect = runDocker(List.of(
+                properties.getCommand(),
+                "inspect",
+                "-f",
+                "{{.Config.Image}}",
+                containerName
+        ));
+        if (inspect.exitCode != 0 || !StringUtils.hasText(inspect.output)) {
+            return null;
+        }
+        return inspect.output.trim();
     }
 
     private void syncManagedSkillsIntoContainer(UUID instanceId,
