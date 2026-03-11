@@ -92,6 +92,12 @@ public class InternalController {
         return new ListResponse<>(runtimeIntrospectionService.listSkills(instanceId));
     }
 
+    @PostMapping("/instances/{instanceId}/skills/sync")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void syncManagedSkills(@PathVariable UUID instanceId) {
+        dockerRuntimeService.syncManagedSkills(instanceId);
+    }
+
     @GetMapping("/instances/{instanceId}/pairing-code")
     public PairingCodeResponse getPairingCode(@PathVariable UUID instanceId) {
         return pairingCodeService.fetchPairingCode(instanceId);

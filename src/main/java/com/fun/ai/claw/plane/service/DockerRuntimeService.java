@@ -2,6 +2,8 @@ package com.fun.ai.claw.plane.service;
 
 import com.fun.ai.claw.plane.config.DockerRuntimeProperties;
 import com.fun.ai.claw.plane.model.CommandAction;
+import com.fun.ai.claw.plane.model.ManagedSkillAssetRecord;
+import com.fun.ai.claw.plane.repository.ManagedSkillAssetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
@@ -19,8 +21,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -119,12 +123,16 @@ public class DockerRuntimeService {
     );
     private final DockerRuntimeProperties properties;
     private final ResourceLoader resourceLoader;
+    private final ManagedSkillAssetRepository managedSkillAssetRepository;
     private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
     private final HttpClient healthProbeClient;
 
-    public DockerRuntimeService(DockerRuntimeProperties properties, ResourceLoader resourceLoader) {
+    public DockerRuntimeService(DockerRuntimeProperties properties,
+                                ResourceLoader resourceLoader,
+                                ManagedSkillAssetRepository managedSkillAssetRepository) {
         this.properties = properties;
         this.resourceLoader = resourceLoader;
+        this.managedSkillAssetRepository = managedSkillAssetRepository;
         this.healthProbeClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
@@ -222,6 +230,15 @@ public class DockerRuntimeService {
         }
     }
 
+    public void syncManagedSkills(UUID instanceId) {
+        materializeManagedSkillsHostDir(instanceId, null);
+        String containerName = containerName(instanceId);
+        if (!containerExists(containerName) || !containerRunning(containerName)) {
+            return;
+        }
+        syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
+    }
+
     private String startInstance(UUID instanceId,
                                  String image,
                                  Integer gatewayHostPort,
@@ -230,6 +247,7 @@ public class DockerRuntimeService {
                                  String configTomlContent,
                                  boolean configTomlOverwrite) {
         String containerName = containerName(instanceId);
+        materializeManagedSkillsHostDir(instanceId, gatewayHostPort);
         boolean createdNow = false;
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
@@ -254,6 +272,7 @@ public class DockerRuntimeService {
             syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
             runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
             enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
+            syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
             enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
             waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         } catch (DockerOperationException ex) {
@@ -287,6 +306,7 @@ public class DockerRuntimeService {
                                    String configTomlContent,
                                    boolean configTomlOverwrite) {
         String containerName = containerName(instanceId);
+        materializeManagedSkillsHostDir(instanceId, gatewayHostPort);
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
                 throw new DockerOperationException("image is required to create container for restart");
@@ -296,6 +316,7 @@ public class DockerRuntimeService {
                 syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
                 runDockerChecked(List.of(properties.getCommand(), "start", containerName), "failed to start container");
                 enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
+                syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
                 enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
                 waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
             } catch (DockerOperationException ex) {
@@ -308,6 +329,7 @@ public class DockerRuntimeService {
         syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
         runDockerChecked(List.of(properties.getCommand(), "restart", containerName), "failed to restart container");
         enforceWorkspaceAgentsGuide(containerName, agentsMdContent, agentsMdOverwrite);
+        syncManagedSkillsIntoRunningContainerIfNeeded(instanceId, containerName);
         enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
@@ -316,6 +338,7 @@ public class DockerRuntimeService {
     private String deleteInstance(UUID instanceId) {
         String containerName = containerName(instanceId);
         if (!containerExists(containerName)) {
+            cleanupManagedSkillsHostDir(instanceId, null);
             return "Container not found, delete skipped: " + containerName;
         }
 
@@ -333,6 +356,7 @@ public class DockerRuntimeService {
         }
 
         runDockerChecked(List.of(properties.getCommand(), "rm", containerName), "failed to delete container");
+        cleanupManagedSkillsHostDir(instanceId, null);
         return "Container deleted: " + containerName;
     }
 
@@ -375,6 +399,7 @@ public class DockerRuntimeService {
         command.add("--ulimit");
         command.add("nofile=65536:65536");
         appendAgentWorkspaceMountArgs(command, instanceId, hostPort);
+        appendInstanceSkillsMountArgs(command, instanceId, hostPort);
         command.add(image);
         command.add("gateway");
         command.add("--host");
@@ -402,6 +427,214 @@ public class DockerRuntimeService {
                 : hostPath.trim() + ":" + containerPath.trim();
         command.add("-v");
         command.add(mountExpr);
+    }
+
+    private void appendInstanceSkillsMountArgs(List<String> command, UUID instanceId, int gatewayHostPort) {
+        if (!properties.isInstanceSkillsMountEnabled()) {
+            return;
+        }
+        String hostPath = resolveManagedSkillsHostPath(instanceId, gatewayHostPort);
+        String containerPath = normalizeManagedSkillsContainerPath();
+        if (!StringUtils.hasText(hostPath) || !StringUtils.hasText(containerPath)) {
+            log.warn("skip managed skills mount because hostPath or containerPath is blank");
+            return;
+        }
+        String mountExpr = properties.isInstanceSkillsMountReadOnly()
+                ? hostPath.trim() + ":" + containerPath + ":ro"
+                : hostPath.trim() + ":" + containerPath;
+        command.add("-v");
+        command.add(mountExpr);
+    }
+
+    private void materializeManagedSkillsHostDir(UUID instanceId, Integer gatewayHostPort) {
+        String hostPath = resolveManagedSkillsHostPath(instanceId, gatewayHostPort);
+        if (!StringUtils.hasText(hostPath)) {
+            log.warn("skip managed skills materialization because host path is blank");
+            return;
+        }
+        try {
+            reconcileManagedSkillsDirectory(Path.of(hostPath.trim()), loadManagedSkillAssets(instanceId));
+        } catch (IOException ex) {
+            throw new DockerOperationException("failed to materialize managed skills for " + instanceId + ": " + ex.getMessage(), ex);
+        }
+    }
+
+    private void cleanupManagedSkillsHostDir(UUID instanceId, Integer gatewayHostPort) {
+        String hostPath = resolveManagedSkillsHostPath(instanceId, gatewayHostPort);
+        if (!StringUtils.hasText(hostPath)) {
+            return;
+        }
+        try {
+            deleteRecursively(Path.of(hostPath.trim()));
+        } catch (IOException ex) {
+            log.warn("failed to clean managed skills host dir for {}: {}", instanceId, ex.getMessage());
+        }
+    }
+
+    private String resolveManagedSkillsHostPath(UUID instanceId, Integer gatewayHostPort) {
+        int resolvedPort = gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort();
+        return resolveTemplate(properties.getInstanceSkillsHostPathTemplate(), instanceId, resolvedPort);
+    }
+
+    private String normalizeManagedSkillsContainerPath() {
+        return StringUtils.hasText(properties.getInstanceSkillsContainerPath())
+                ? properties.getInstanceSkillsContainerPath().trim()
+                : "/workspace/skills";
+    }
+
+    private List<ManagedSkillAssetRecord> loadManagedSkillAssets(UUID instanceId) {
+        return managedSkillAssetRepository.findEnabledByInstanceId(instanceId);
+    }
+
+    private void reconcileManagedSkillsDirectory(Path rootDir, List<ManagedSkillAssetRecord> assets) throws IOException {
+        Files.createDirectories(rootDir);
+        Set<String> targetSkillKeys = new LinkedHashSet<>();
+        for (ManagedSkillAssetRecord asset : assets) {
+            String skillKey = asset.skillKey() == null ? "" : asset.skillKey().trim();
+            if (!StringUtils.hasText(skillKey)) {
+                continue;
+            }
+            targetSkillKeys.add(skillKey);
+            writeManagedSkillDirectory(rootDir, skillKey, asset.skillMd());
+        }
+
+        try (var children = Files.list(rootDir)) {
+            for (Path child : children.toList()) {
+                String name = child.getFileName() == null ? "" : child.getFileName().toString();
+                if (!StringUtils.hasText(name) || name.startsWith(".")) {
+                    continue;
+                }
+                if (!targetSkillKeys.contains(name)) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+    }
+
+    private void writeManagedSkillDirectory(Path rootDir, String skillKey, String skillMd) throws IOException {
+        Path targetDir = rootDir.resolve(skillKey);
+        Path stagingDir = rootDir.resolve("." + skillKey + ".tmp-" + UUID.randomUUID());
+        deleteRecursively(stagingDir);
+        Files.createDirectories(stagingDir);
+        Files.writeString(
+                stagingDir.resolve("SKILL.md"),
+                skillMd == null ? "" : skillMd,
+                StandardCharsets.UTF_8
+        );
+        deleteRecursively(targetDir);
+        try {
+            Files.move(stagingDir, targetDir, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException ex) {
+            Files.move(stagingDir, targetDir, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private void syncManagedSkillsIntoRunningContainerIfNeeded(UUID instanceId, String containerName) {
+        if (!containerRunning(containerName)) {
+            return;
+        }
+        String managedSkillsContainerPath = normalizeManagedSkillsContainerPath();
+        if (containerHasMountDestination(containerName, managedSkillsContainerPath)) {
+            return;
+        }
+        syncManagedSkillsIntoContainer(instanceId, containerName, managedSkillsContainerPath, loadManagedSkillAssets(instanceId));
+    }
+
+    private boolean containerHasMountDestination(String containerName, String destinationPath) {
+        if (!StringUtils.hasText(destinationPath)) {
+            return false;
+        }
+        CommandResult inspect = runDocker(List.of(
+                properties.getCommand(),
+                "inspect",
+                "-f",
+                "{{range .Mounts}}{{println .Destination}}{{end}}",
+                containerName
+        ));
+        if (inspect.exitCode != 0 || !StringUtils.hasText(inspect.output)) {
+            return false;
+        }
+        return inspect.output.lines()
+                .map(String::trim)
+                .anyMatch(destinationPath::equals);
+    }
+
+    private void syncManagedSkillsIntoContainer(UUID instanceId,
+                                                String containerName,
+                                                String containerRootPath,
+                                                List<ManagedSkillAssetRecord> assets) {
+        if (!StringUtils.hasText(containerRootPath)) {
+            return;
+        }
+        Set<String> targetSkillKeys = new LinkedHashSet<>();
+        for (ManagedSkillAssetRecord asset : assets) {
+            String skillKey = asset.skillKey() == null ? "" : asset.skillKey().trim();
+            if (!StringUtils.hasText(skillKey)) {
+                continue;
+            }
+            targetSkillKeys.add(skillKey);
+            writeFile(instanceId, joinContainerPath(joinContainerPath(containerRootPath, skillKey), "SKILL.md"),
+                    (asset.skillMd() == null ? "" : asset.skillMd()).getBytes(StandardCharsets.UTF_8), true);
+        }
+        for (String existingSkillDir : listManagedSkillDirsInContainer(containerName, containerRootPath)) {
+            if (!targetSkillKeys.contains(existingSkillDir)) {
+                removeContainerDirectory(containerName, joinContainerPath(containerRootPath, existingSkillDir));
+            }
+        }
+    }
+
+    private List<String> listManagedSkillDirsInContainer(String containerName, String containerRootPath) {
+        CommandResult listResult = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "sh",
+                "-lc",
+                "/bin/busybox test -d " + shellQuote(containerRootPath)
+                        + " && /bin/busybox find " + shellQuote(containerRootPath)
+                        + " -mindepth 1 -maxdepth 1 -type d"
+        ));
+        if (listResult.exitCode != 0 || !StringUtils.hasText(listResult.output)) {
+            return List.of();
+        }
+        return listResult.output.lines()
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .map(path -> {
+                    int lastSlash = path.lastIndexOf('/');
+                    return lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+                })
+                .filter(name -> !name.startsWith("."))
+                .distinct()
+                .toList();
+    }
+
+    private void removeContainerDirectory(String containerName, String containerPath) {
+        CommandResult result = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                "/bin/busybox",
+                "rm",
+                "-rf",
+                containerPath
+        ));
+        if (result.exitCode != 0) {
+            throw new DockerOperationException("failed to remove container directory " + containerPath + ": "
+                    + (result.output == null ? "" : result.output.trim()));
+        }
+    }
+
+    private void deleteRecursively(Path target) throws IOException {
+        if (target == null || !Files.exists(target)) {
+            return;
+        }
+        try (var walk = Files.walk(target)) {
+            for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     private void appendGatewaySecurityArgs(List<String> command, Set<String> supportedOptions) {

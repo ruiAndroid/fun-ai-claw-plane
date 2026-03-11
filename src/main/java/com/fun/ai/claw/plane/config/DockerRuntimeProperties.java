@@ -32,6 +32,10 @@ public class DockerRuntimeProperties {
     private String agentWorkspaceHostPathTemplate = "";
     private String agentWorkspaceContainerPathTemplate = "/workspace/agent-mgc-novel-script";
     private boolean agentWorkspaceMountReadOnly = true;
+    private boolean instanceSkillsMountEnabled = true;
+    private String instanceSkillsHostPathTemplate = "/opt/fun-ai-claw/instance-skills/{instanceId}";
+    private String instanceSkillsContainerPath = "/workspace/skills";
+    private boolean instanceSkillsMountReadOnly = true;
     private boolean workspaceAgentsAutoSyncEnabled = true;
     private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
     private boolean runtimeConfigPolicyEnabled = false;
@@ -253,6 +257,38 @@ public class DockerRuntimeProperties {
 
     public void setAgentWorkspaceMountReadOnly(boolean agentWorkspaceMountReadOnly) {
         this.agentWorkspaceMountReadOnly = agentWorkspaceMountReadOnly;
+    }
+
+    public boolean isInstanceSkillsMountEnabled() {
+        return instanceSkillsMountEnabled;
+    }
+
+    public void setInstanceSkillsMountEnabled(boolean instanceSkillsMountEnabled) {
+        this.instanceSkillsMountEnabled = instanceSkillsMountEnabled;
+    }
+
+    public String getInstanceSkillsHostPathTemplate() {
+        return instanceSkillsHostPathTemplate;
+    }
+
+    public void setInstanceSkillsHostPathTemplate(String instanceSkillsHostPathTemplate) {
+        this.instanceSkillsHostPathTemplate = instanceSkillsHostPathTemplate;
+    }
+
+    public String getInstanceSkillsContainerPath() {
+        return instanceSkillsContainerPath;
+    }
+
+    public void setInstanceSkillsContainerPath(String instanceSkillsContainerPath) {
+        this.instanceSkillsContainerPath = instanceSkillsContainerPath;
+    }
+
+    public boolean isInstanceSkillsMountReadOnly() {
+        return instanceSkillsMountReadOnly;
+    }
+
+    public void setInstanceSkillsMountReadOnly(boolean instanceSkillsMountReadOnly) {
+        this.instanceSkillsMountReadOnly = instanceSkillsMountReadOnly;
     }
 
     public boolean isWorkspaceAgentsAutoSyncEnabled() {
