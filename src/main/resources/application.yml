@@ -43,7 +43,7 @@ app:
     agent-workspace-container-path-template: /workspace/agent-mgc-novel-script
     agent-workspace-mount-read-only: true
     instance-skills-mount-enabled: true
-    instance-skills-host-path-template: /opt/fun-ai-claw/instance-skills/{instanceId}
+    instance-skills-host-path-template: /data/funai/fun-ai-claw/instance-skills/{instanceId}
     instance-skills-container-path: /workspace/skills
     instance-skills-mount-read-only: true
     workspace-agents-auto-sync-enabled: true
