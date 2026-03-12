@@ -72,7 +72,9 @@ public class DockerRuntimeService {
             Pattern.compile("(?m)^\\s*hint\\s*=\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*$");
     private static final Pattern KEYWORDS_ARRAY_PATTERN =
             Pattern.compile("(?ms)^\\s*keywords\\s*=\\s*\\[(.*?)]\\s*$");
-    private static final Pattern LITERALS_ARRAY_PATTERN =
+    private static final Pattern PATTERNS_ARRAY_PATTERN =
+            Pattern.compile("(?ms)^\\s*patterns\\s*=\\s*\\[(.*?)]\\s*$");
+    private static final Pattern LEGACY_LITERALS_ARRAY_PATTERN =
             Pattern.compile("(?ms)^\\s*literals\\s*=\\s*\\[(.*?)]\\s*$");
     private static final Pattern QUOTED_STRING_PATTERN =
             Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
@@ -1002,7 +1004,8 @@ public class DockerRuntimeService {
                 fragment,
                 match -> matchesManagedHint(match.body(), delegateAgentProfile.agentId())
                         || containsAnyQuotedValue(findDelimitedValue(KEYWORDS_ARRAY_PATTERN, match.body()), NOVEL_SCRIPT_RULE_KEYWORDS)
-                        || containsAnyQuotedValue(findDelimitedValue(LITERALS_ARRAY_PATTERN, match.body()), NOVEL_SCRIPT_RULE_LITERALS)
+                        || containsAnyQuotedValue(findDelimitedValue(PATTERNS_ARRAY_PATTERN, match.body()), NOVEL_SCRIPT_RULE_LITERALS)
+                        || containsAnyQuotedValue(findDelimitedValue(LEGACY_LITERALS_ARRAY_PATTERN, match.body()), NOVEL_SCRIPT_RULE_LITERALS)
         );
     }
 
@@ -1191,7 +1194,7 @@ public class DockerRuntimeService {
                             "/bin/busybox",
                             "sh",
                             "-lc",
-                            "/bin/busybox cat > /data/zeroclaw/config.toml && /bin/busybox chmod 644 /data/zeroclaw/config.toml && /bin/busybox chown nobody:nobody /data/zeroclaw/config.toml"
+                            "/bin/busybox cat > /data/zeroclaw/config.toml && /bin/busybox chown nobody:nobody /data/zeroclaw/config.toml && /bin/busybox chmod 600 /data/zeroclaw/config.toml"
                     ),
                     (configText == null ? "" : configText).getBytes(StandardCharsets.UTF_8)
             );
@@ -1220,6 +1223,22 @@ public class DockerRuntimeService {
                 return copyResult;
             }
             if (containerRunning(containerName)) {
+                CommandResult chownResult = runDocker(List.of(
+                        properties.getCommand(),
+                        "exec",
+                        "-u",
+                        "0",
+                        containerName,
+                        "/bin/busybox",
+                        "chown",
+                        "nobody:nobody",
+                        "/data/zeroclaw/config.toml"
+                ));
+                if (chownResult.exitCode != 0) {
+                    log.warn("failed to chown config.toml in {} after docker cp: {}",
+                            containerName,
+                            chownResult.output == null ? "" : chownResult.output.trim());
+                }
                 CommandResult chmodResult = runDocker(List.of(
                         properties.getCommand(),
                         "exec",
@@ -1228,7 +1247,7 @@ public class DockerRuntimeService {
                         containerName,
                         "/bin/busybox",
                         "chmod",
-                        "644",
+                        "600",
                         "/data/zeroclaw/config.toml"
                 ));
                 if (chmodResult.exitCode != 0) {
