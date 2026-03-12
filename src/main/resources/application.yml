@@ -61,7 +61,7 @@ app:
     delegate-agent-section-fragment-path: classpath:zeroclaw-fragments/delegate-agent.toml
     delegate-agent-profile-enabled: ${DOCKER_DELEGATE_AGENT_PROFILE_ENABLED:true}
     delegate-agent-profile-id: ${DOCKER_DELEGATE_AGENT_PROFILE_ID:mgc-novel-to-script}
-    delegate-agent-manifest-relative-path: agent.minifest.json
+    delegate-agent-manifest-relative-path: agent.manifest.json
     delegate-agent-provider-override: ${DOCKER_DELEGATE_AGENT_PROVIDER_OVERRIDE:}
     delegate-agent-model-override: ${DOCKER_DELEGATE_AGENT_MODEL_OVERRIDE:}
     delegate-agent-temperature-override: ${DOCKER_DELEGATE_AGENT_TEMPERATURE_OVERRIDE:}
