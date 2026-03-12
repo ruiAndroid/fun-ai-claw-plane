@@ -214,6 +214,8 @@ public class DockerRuntimeService {
                 List.of(
                         properties.getCommand(),
                         "exec",
+                        "-u",
+                        "0",
                         "-i",
                         containerName,
                         "/bin/busybox",
@@ -1282,7 +1284,7 @@ public class DockerRuntimeService {
                             "/bin/busybox",
                             "sh",
                             "-lc",
-                            "/bin/busybox cat > /data/zeroclaw/config.toml && /bin/busybox chmod 644 /data/zeroclaw/config.toml"
+                            "/bin/busybox cat > /data/zeroclaw/config.toml && /bin/busybox chmod 644 /data/zeroclaw/config.toml && /bin/busybox chown nobody:nobody /data/zeroclaw/config.toml"
                     ),
                     (configText == null ? "" : configText).getBytes(StandardCharsets.UTF_8)
             );
