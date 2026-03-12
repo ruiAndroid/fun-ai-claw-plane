@@ -52,20 +52,15 @@ app:
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
     runtime-config-policy-enabled: ${DOCKER_RUNTIME_CONFIG_POLICY_ENABLED:false}
     runtime-config-gateway-section-enabled: ${DOCKER_RUNTIME_CONFIG_GATEWAY_SECTION_ENABLED:true}
-    runtime-config-delegate-agent-section-enabled: ${DOCKER_RUNTIME_CONFIG_DELEGATE_AGENT_SECTION_ENABLED:true}
     runtime-config-model-route-section-enabled: ${DOCKER_RUNTIME_CONFIG_MODEL_ROUTE_SECTION_ENABLED:false}
     runtime-config-query-classification-rule-section-enabled: ${DOCKER_RUNTIME_CONFIG_QUERY_CLASSIFICATION_RULE_SECTION_ENABLED:false}
     gateway-section-fragment-path: classpath:zeroclaw-fragments/gateway.toml
     model-route-section-fragment-path: classpath:zeroclaw-fragments/model-route.toml
     query-classification-rule-section-fragment-path: classpath:zeroclaw-fragments/query-classification-rule.toml
-    delegate-agent-section-fragment-path: classpath:zeroclaw-fragments/delegate-agent.toml
-    delegate-agent-profile-enabled: ${DOCKER_DELEGATE_AGENT_PROFILE_ENABLED:true}
     delegate-agent-profile-id: ${DOCKER_DELEGATE_AGENT_PROFILE_ID:mgc-novel-to-script}
-    delegate-agent-manifest-relative-path: agent.manifest.json
     delegate-agent-provider-override: ${DOCKER_DELEGATE_AGENT_PROVIDER_OVERRIDE:}
     delegate-agent-model-override: ${DOCKER_DELEGATE_AGENT_MODEL_OVERRIDE:}
     delegate-agent-temperature-override: ${DOCKER_DELEGATE_AGENT_TEMPERATURE_OVERRIDE:}
-    delegate-agent-max-iterations: ${DOCKER_DELEGATE_AGENT_MAX_ITERATIONS:30}
     api-key: ${ZEROCLAW_API_KEY:}
     stop-timeout-seconds: ${DOCKER_STOP_TIMEOUT_SECONDS:20}
     command-timeout-seconds: ${DOCKER_COMMAND_TIMEOUT_SECONDS:120}
@@ -91,5 +86,4 @@ app:
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:${DOCKER_CONTAINER_PREFIX:funclaw}}
     shell: ${TERMINAL_SHELL:/bin/busybox sh}
     process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
-
 

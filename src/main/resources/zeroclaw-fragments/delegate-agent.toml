@@ -1,7 +1,0 @@
-[agents."{{delegateAgentId}}"]
-provider = "{{delegateProvider}}"
-model = "{{delegateModel}}"
-{{delegateTemperatureLine}}
-{{delegateAgenticLine}}
-{{delegateAllowedToolsBlock}}
-{{delegateMaxIterationsLine}}

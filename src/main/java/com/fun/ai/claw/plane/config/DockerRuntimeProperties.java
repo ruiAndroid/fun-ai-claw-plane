@@ -40,21 +40,16 @@ public class DockerRuntimeProperties {
     private String workspaceAgentsFilePath = "/zeroclaw-data/workspace/AGENTS.md";
     private boolean runtimeConfigPolicyEnabled = false;
     private boolean runtimeConfigGatewaySectionEnabled = false;
-    private boolean runtimeConfigDelegateAgentSectionEnabled = false;
     private boolean runtimeConfigModelRouteSectionEnabled = false;
     private boolean runtimeConfigQueryClassificationRuleSectionEnabled = false;
     private String gatewaySectionFragmentPath = "classpath:zeroclaw-fragments/gateway.toml";
     private String modelRouteSectionFragmentPath = "classpath:zeroclaw-fragments/model-route.toml";
     private String queryClassificationRuleSectionFragmentPath =
             "classpath:zeroclaw-fragments/query-classification-rule.toml";
-    private String delegateAgentSectionFragmentPath = "classpath:zeroclaw-fragments/delegate-agent.toml";
-    private boolean delegateAgentProfileEnabled = true;
     private String delegateAgentProfileId = "mgc-novel-to-script";
-    private String delegateAgentManifestRelativePath = "agent.minifest.json";
     private String delegateAgentProviderOverride = "";
     private String delegateAgentModelOverride = "";
     private String delegateAgentTemperatureOverride = "";
-    private int delegateAgentMaxIterations = 30;
     private String apiKey;
     private long stopTimeoutSeconds = 20;
     private long commandTimeoutSeconds = 120;
@@ -323,14 +318,6 @@ public class DockerRuntimeProperties {
         this.runtimeConfigGatewaySectionEnabled = runtimeConfigGatewaySectionEnabled;
     }
 
-    public boolean isRuntimeConfigDelegateAgentSectionEnabled() {
-        return runtimeConfigDelegateAgentSectionEnabled;
-    }
-
-    public void setRuntimeConfigDelegateAgentSectionEnabled(boolean runtimeConfigDelegateAgentSectionEnabled) {
-        this.runtimeConfigDelegateAgentSectionEnabled = runtimeConfigDelegateAgentSectionEnabled;
-    }
-
     public boolean isRuntimeConfigModelRouteSectionEnabled() {
         return runtimeConfigModelRouteSectionEnabled;
     }
@@ -352,10 +339,6 @@ public class DockerRuntimeProperties {
         return runtimeConfigPolicyEnabled || runtimeConfigGatewaySectionEnabled;
     }
 
-    public boolean isDelegateAgentRuntimeConfigPatchEnabled() {
-        return runtimeConfigPolicyEnabled || runtimeConfigDelegateAgentSectionEnabled;
-    }
-
     public boolean isModelRouteRuntimeConfigPatchEnabled() {
         return runtimeConfigPolicyEnabled || runtimeConfigModelRouteSectionEnabled;
     }
@@ -366,7 +349,6 @@ public class DockerRuntimeProperties {
 
     public boolean isAnyRuntimeConfigPatchEnabled() {
         return isGatewayRuntimeConfigPatchEnabled()
-                || isDelegateAgentRuntimeConfigPatchEnabled()
                 || isModelRouteRuntimeConfigPatchEnabled()
                 || isQueryClassificationRuleRuntimeConfigPatchEnabled();
     }
@@ -395,36 +377,12 @@ public class DockerRuntimeProperties {
         this.queryClassificationRuleSectionFragmentPath = queryClassificationRuleSectionFragmentPath;
     }
 
-    public String getDelegateAgentSectionFragmentPath() {
-        return delegateAgentSectionFragmentPath;
-    }
-
-    public void setDelegateAgentSectionFragmentPath(String delegateAgentSectionFragmentPath) {
-        this.delegateAgentSectionFragmentPath = delegateAgentSectionFragmentPath;
-    }
-
-    public boolean isDelegateAgentProfileEnabled() {
-        return delegateAgentProfileEnabled;
-    }
-
-    public void setDelegateAgentProfileEnabled(boolean delegateAgentProfileEnabled) {
-        this.delegateAgentProfileEnabled = delegateAgentProfileEnabled;
-    }
-
     public String getDelegateAgentProfileId() {
         return delegateAgentProfileId;
     }
 
     public void setDelegateAgentProfileId(String delegateAgentProfileId) {
         this.delegateAgentProfileId = delegateAgentProfileId;
-    }
-
-    public String getDelegateAgentManifestRelativePath() {
-        return delegateAgentManifestRelativePath;
-    }
-
-    public void setDelegateAgentManifestRelativePath(String delegateAgentManifestRelativePath) {
-        this.delegateAgentManifestRelativePath = delegateAgentManifestRelativePath;
     }
 
     public String getDelegateAgentProviderOverride() {
@@ -449,14 +407,6 @@ public class DockerRuntimeProperties {
 
     public void setDelegateAgentTemperatureOverride(String delegateAgentTemperatureOverride) {
         this.delegateAgentTemperatureOverride = delegateAgentTemperatureOverride;
-    }
-
-    public int getDelegateAgentMaxIterations() {
-        return delegateAgentMaxIterations;
-    }
-
-    public void setDelegateAgentMaxIterations(int delegateAgentMaxIterations) {
-        this.delegateAgentMaxIterations = delegateAgentMaxIterations;
     }
 
     public String getApiKey() {
