@@ -497,7 +497,7 @@ public class DockerRuntimeService {
     private String normalizeManagedSkillsContainerPath() {
         return StringUtils.hasText(properties.getInstanceSkillsContainerPath())
                 ? properties.getInstanceSkillsContainerPath().trim()
-                : "/workspace/skills";
+                : "/workspace/open-skills/skills";
     }
 
     private void reconcileManagedSkillsDirectory(Path rootDir, List<ManagedSkillAssetRecord> assets) throws IOException {

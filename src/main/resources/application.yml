@@ -46,7 +46,7 @@ app:
     agent-workspace-mount-read-only: true
     instance-skills-mount-enabled: true
     instance-skills-host-path-template: /data/funai/fun-ai-claw/instance-skills/{instanceId}
-    instance-skills-container-path: /workspace/skills
+    instance-skills-container-path: /workspace/open-skills/skills
     instance-skills-mount-read-only: true
     workspace-agents-auto-sync-enabled: true
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
@@ -86,4 +86,3 @@ app:
     container-prefix: ${TERMINAL_CONTAINER_PREFIX:${DOCKER_CONTAINER_PREFIX:funclaw}}
     shell: ${TERMINAL_SHELL:/bin/busybox sh}
     process-shutdown-timeout-seconds: ${TERMINAL_PROCESS_SHUTDOWN_TIMEOUT_SECONDS:2}
-

@@ -360,7 +360,9 @@ public class RuntimeIntrospectionService {
     private List<String> resolveSkillDirs(UUID instanceId, SkillsConfig skillsConfig) {
         LinkedHashSet<String> orderedDirs = new LinkedHashSet<>();
         if (skillsConfig.openSkillsEnabled() && StringUtils.hasText(skillsConfig.openSkillsDir())) {
-            orderedDirs.add(skillsConfig.openSkillsDir().trim());
+            String openSkillsDir = skillsConfig.openSkillsDir().trim();
+            orderedDirs.add(joinContainerPath(openSkillsDir, "skills"));
+            orderedDirs.add(openSkillsDir);
         }
         orderedDirs.add(resolveWorkspaceSkillsDir());
         String agentWorkspacePath = resolveTemplate(
