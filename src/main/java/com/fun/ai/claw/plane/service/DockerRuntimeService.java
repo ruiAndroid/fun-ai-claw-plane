@@ -7,8 +7,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,6 +37,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 @Service
 public class DockerRuntimeService {
@@ -490,6 +494,57 @@ public class DockerRuntimeService {
         }
     }
 
+    public void importSkillPackage(String skillKey, byte[] zipBytes, boolean overwrite) {
+        String normalizedSkillKey = normalizeRequiredSkillPackageKey(skillKey);
+        if (zipBytes == null || zipBytes.length == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "zip file is required");
+        }
+        Path rootDir = resolveSkillPackagesRootDir();
+        Path targetDir = rootDir.resolve(normalizedSkillKey).normalize();
+        if (!targetDir.startsWith(rootDir)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid skillKey: " + normalizedSkillKey);
+        }
+        if (Files.exists(targetDir) && !overwrite) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "skill package already exists: " + normalizedSkillKey);
+        }
+
+        Path stagingDir = rootDir.resolve("." + normalizedSkillKey + ".upload-" + UUID.randomUUID());
+        try {
+            deleteRecursively(stagingDir);
+            Files.createDirectories(stagingDir);
+            extractSkillPackageZip(zipBytes, stagingDir);
+            Path packageRoot = resolveExtractedSkillRoot(stagingDir);
+            deleteRecursively(targetDir);
+            try {
+                Files.move(packageRoot, targetDir, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException ex) {
+                Files.move(packageRoot, targetDir, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "failed to import skill package " + normalizedSkillKey + ": " + ex.getMessage());
+        } finally {
+            try {
+                deleteRecursively(stagingDir);
+            } catch (IOException ex) {
+                log.warn("failed to clean temporary skill upload dir {}: {}", stagingDir, ex.getMessage());
+            }
+        }
+    }
+
+    public void deleteSkillPackage(String skillKey) {
+        String normalizedSkillKey = normalizeRequiredSkillPackageKey(skillKey);
+        Path targetDir = resolveSkillPackagesRootDir().resolve(normalizedSkillKey).normalize();
+        try {
+            deleteRecursively(targetDir);
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "failed to delete skill package " + normalizedSkillKey + ": " + ex.getMessage());
+        }
+    }
+
     private String resolveManagedSkillsHostPath(UUID instanceId, Integer gatewayHostPort) {
         int resolvedPort = gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort();
         return resolveTemplate(properties.getInstanceSkillsHostPathTemplate(), instanceId, resolvedPort);
@@ -499,6 +554,20 @@ public class DockerRuntimeService {
         return StringUtils.hasText(properties.getInstanceSkillsContainerPath())
                 ? properties.getInstanceSkillsContainerPath().trim()
                 : "/workspace/open-skills/skills";
+    }
+
+    private Path resolveSkillPackagesRootDir() {
+        if (!StringUtils.hasText(properties.getSkillPackagesRootPath())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "skill packages root path is blank");
+        }
+        Path rootDir = Path.of(properties.getSkillPackagesRootPath().trim()).normalize();
+        try {
+            Files.createDirectories(rootDir);
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "failed to prepare skill packages root dir: " + rootDir + " (" + ex.getMessage() + ")");
+        }
+        return rootDir;
     }
 
     private void reconcileManagedSkillsDirectory(Path rootDir, List<ManagedSkillAssetRecord> assets) throws IOException {
@@ -1988,6 +2057,89 @@ public class DockerRuntimeService {
                 Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
             }
         }
+    }
+
+    private void extractSkillPackageZip(byte[] zipBytes, Path targetDir) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new java.io.ByteArrayInputStream(zipBytes))) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                String entryName = normalizeZipEntryName(entry.getName());
+                if (!StringUtils.hasText(entryName) || shouldSkipZipEntry(entryName)) {
+                    zipInputStream.closeEntry();
+                    continue;
+                }
+                Path relativePath = Path.of(entryName).normalize();
+                if (relativePath.isAbsolute() || startsWithParentTraversal(relativePath)) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid zip entry: " + entry.getName());
+                }
+                Path targetPath = targetDir.resolve(relativePath.toString()).normalize();
+                if (!targetPath.startsWith(targetDir)) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid zip entry: " + entry.getName());
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(targetPath);
+                } else {
+                    Path parent = targetPath.getParent();
+                    if (parent != null) {
+                        Files.createDirectories(parent);
+                    }
+                    Files.copy(zipInputStream, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+                zipInputStream.closeEntry();
+            }
+        }
+    }
+
+    private Path resolveExtractedSkillRoot(Path stagingDir) throws IOException {
+        Path directSkillMd = stagingDir.resolve("SKILL.md");
+        if (Files.isRegularFile(directSkillMd)) {
+            return stagingDir;
+        }
+        List<Path> children;
+        try (var stream = Files.list(stagingDir)) {
+            children = stream
+                    .filter(path -> {
+                        String name = path.getFileName() == null ? "" : path.getFileName().toString();
+                        return StringUtils.hasText(name) && !name.startsWith(".");
+                    })
+                    .toList();
+        }
+        if (children.size() == 1 && Files.isDirectory(children.get(0))) {
+            Path nestedRoot = children.get(0);
+            if (Files.isRegularFile(nestedRoot.resolve("SKILL.md"))) {
+                return nestedRoot;
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "uploaded skill package must contain SKILL.md");
+    }
+
+    private String normalizeZipEntryName(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace('\\', '/').trim();
+    }
+
+    private boolean shouldSkipZipEntry(String entryName) {
+        return entryName.startsWith("__MACOSX/")
+                || entryName.endsWith("/.DS_Store")
+                || entryName.equals(".DS_Store");
+    }
+
+    private boolean startsWithParentTraversal(Path relativePath) {
+        return relativePath.getNameCount() > 0 && "..".equals(relativePath.getName(0).toString());
+    }
+
+    private String normalizeRequiredSkillPackageKey(String skillKey) {
+        String normalized = StringUtils.hasText(skillKey) ? skillKey.trim() : null;
+        if (!StringUtils.hasText(normalized)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "skillKey is required");
+        }
+        if (!normalized.matches("[A-Za-z0-9._-]+")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "invalid skillKey: " + normalized + ", only letters, digits, dot, underscore, and hyphen are allowed");
+        }
+        return normalized;
     }
 
     private String valueAsString(Object value) {

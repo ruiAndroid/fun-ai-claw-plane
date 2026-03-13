@@ -100,6 +100,20 @@ public class InternalController {
         dockerRuntimeService.syncManagedSkills(instanceId, request == null ? null : request.items());
     }
 
+    @PutMapping(value = "/skill-packages/{skillKey}", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void uploadSkillPackage(@PathVariable String skillKey,
+                                   @RequestParam(defaultValue = "false") boolean overwrite,
+                                   @RequestBody byte[] zipBytes) {
+        dockerRuntimeService.importSkillPackage(skillKey, zipBytes, overwrite);
+    }
+
+    @DeleteMapping("/skill-packages/{skillKey}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSkillPackage(@PathVariable String skillKey) {
+        dockerRuntimeService.deleteSkillPackage(skillKey);
+    }
+
     @GetMapping("/instances/{instanceId}/pairing-code")
     public PairingCodeResponse getPairingCode(@PathVariable UUID instanceId) {
         return pairingCodeService.fetchPairingCode(instanceId);
