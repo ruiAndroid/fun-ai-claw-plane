@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 public class RuntimeIntrospectionService {
 
     private static final String DEFAULT_CONFIG_PATH = "/data/zeroclaw/config.toml";
-    private static final String DEFAULT_WORKSPACE_SKILLS_DIR = "/zeroclaw-data/workspace/skills";
+    private static final String DEFAULT_WORKSPACE_SKILLS_DIR = "/zeroclaw-data/workspace/open-skills/skills";
 
     private static final Pattern AGENT_BLOCK_PATTERN = Pattern.compile(
             "(?ms)^\\s*\\[\\s*agents\\s*\\.\\s*(?:\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'|([A-Za-z0-9_-]+))\\s*\\]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
@@ -388,7 +388,7 @@ public class RuntimeIntrospectionService {
         if (lastSlash <= 0) {
             return DEFAULT_WORKSPACE_SKILLS_DIR;
         }
-        return normalized.substring(0, lastSlash) + "/skills";
+        return normalized.substring(0, lastSlash) + "/open-skills/skills";
     }
 
     private List<String> listSkillFiles(String containerName, String skillDir) {

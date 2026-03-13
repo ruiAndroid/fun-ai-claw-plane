@@ -34,7 +34,7 @@ public class DockerRuntimeProperties {
     private boolean agentWorkspaceMountReadOnly = true;
     private boolean instanceSkillsMountEnabled = true;
     private String instanceSkillsHostPathTemplate = "/opt/fun-ai-claw/instance-skills/{instanceId}";
-    private String instanceSkillsContainerPath = "/workspace/open-skills/skills";
+    private String instanceSkillsContainerPath = "/zeroclaw-data/workspace/open-skills/skills";
     private boolean instanceSkillsMountReadOnly = true;
     private String skillPackagesRootPath = "/opt/fun-ai-claw/skills";
     private boolean workspaceAgentsAutoSyncEnabled = true;

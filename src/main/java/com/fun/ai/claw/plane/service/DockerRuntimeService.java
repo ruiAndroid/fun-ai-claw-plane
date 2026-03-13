@@ -553,7 +553,7 @@ public class DockerRuntimeService {
     private String normalizeManagedSkillsContainerPath() {
         return StringUtils.hasText(properties.getInstanceSkillsContainerPath())
                 ? properties.getInstanceSkillsContainerPath().trim()
-                : "/workspace/open-skills/skills";
+                : "/zeroclaw-data/workspace/open-skills/skills";
     }
 
     private Path resolveSkillPackagesRootDir() {
