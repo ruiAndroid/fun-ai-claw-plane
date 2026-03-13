@@ -45,6 +45,7 @@ public class DockerRuntimeService {
     private static final String CONFIG_TOML_CONTENT_PAYLOAD_KEY = "configTomlContent";
     private static final String CONFIG_TOML_OVERWRITE_PAYLOAD_KEY = "configTomlOverwrite";
     private static final String MANAGED_SKILLS_PAYLOAD_KEY = "managedSkills";
+    private static final String SERVER_PACKAGE_SOURCE_TYPE = "SERVER_PACKAGE";
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
     private static final Pattern REQUIRE_PAIRING_PATTERN =
             Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
@@ -509,7 +510,7 @@ public class DockerRuntimeService {
                 continue;
             }
             targetSkillKeys.add(skillKey);
-            writeManagedSkillDirectory(rootDir, skillKey, asset.skillMd());
+            writeManagedSkillDirectory(rootDir, asset);
         }
 
         try (var children = Files.list(rootDir)) {
@@ -525,16 +526,14 @@ public class DockerRuntimeService {
         }
     }
 
-    private void writeManagedSkillDirectory(Path rootDir, String skillKey, String skillMd) throws IOException {
+    private void writeManagedSkillDirectory(Path rootDir, ManagedSkillAssetRecord asset) throws IOException {
+        String skillKey = asset.skillKey().trim();
+        Path sourceDir = resolveManagedSkillPackageDir(asset);
         Path targetDir = rootDir.resolve(skillKey);
         Path stagingDir = rootDir.resolve("." + skillKey + ".tmp-" + UUID.randomUUID());
         deleteRecursively(stagingDir);
         Files.createDirectories(stagingDir);
-        Files.writeString(
-                stagingDir.resolve("SKILL.md"),
-                skillMd == null ? "" : skillMd,
-                StandardCharsets.UTF_8
-        );
+        copyDirectoryContents(sourceDir, stagingDir);
         deleteRecursively(targetDir);
         try {
             Files.move(stagingDir, targetDir, StandardCopyOption.ATOMIC_MOVE);
@@ -601,6 +600,13 @@ public class DockerRuntimeService {
         if (!StringUtils.hasText(containerRootPath)) {
             return;
         }
+        String hostPath = resolveManagedSkillsHostPath(instanceId, null);
+        if (!StringUtils.hasText(hostPath)) {
+            log.warn("skip in-container managed skill sync for {} because host path is blank", instanceId);
+            return;
+        }
+        Path hostRoot = Path.of(hostPath.trim());
+        ensureContainerDirectory(containerName, containerRootPath);
         Set<String> targetSkillKeys = new LinkedHashSet<>();
         for (ManagedSkillAssetRecord asset : assets) {
             String skillKey = asset.skillKey() == null ? "" : asset.skillKey().trim();
@@ -608,13 +614,44 @@ public class DockerRuntimeService {
                 continue;
             }
             targetSkillKeys.add(skillKey);
-            writeFile(instanceId, joinContainerPath(joinContainerPath(containerRootPath, skillKey), "SKILL.md"),
-                    (asset.skillMd() == null ? "" : asset.skillMd()).getBytes(StandardCharsets.UTF_8), true);
+            Path hostSkillDir = hostRoot.resolve(skillKey);
+            if (!Files.isDirectory(hostSkillDir)) {
+                throw new DockerOperationException("managed skill host dir not found: " + hostSkillDir);
+            }
+            removeContainerDirectory(containerName, joinContainerPath(containerRootPath, skillKey));
+            CommandResult copyResult = runDocker(List.of(
+                    properties.getCommand(),
+                    "cp",
+                    hostSkillDir.toString(),
+                    containerName + ":" + containerRootPath
+            ));
+            if (copyResult.exitCode != 0) {
+                String details = StringUtils.hasText(copyResult.output) ? ": " + copyResult.output.trim() : "";
+                throw new DockerOperationException("failed to copy managed skill " + skillKey + " into container" + details);
+            }
         }
         for (String existingSkillDir : listManagedSkillDirsInContainer(containerName, containerRootPath)) {
             if (!targetSkillKeys.contains(existingSkillDir)) {
                 removeContainerDirectory(containerName, joinContainerPath(containerRootPath, existingSkillDir));
             }
+        }
+    }
+
+    private void ensureContainerDirectory(String containerName, String containerDir) {
+        CommandResult mkdir = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                "-u",
+                "0",
+                containerName,
+                "/bin/busybox",
+                "mkdir",
+                "-p",
+                containerDir
+        ));
+        if (mkdir.exitCode != 0) {
+            String details = StringUtils.hasText(mkdir.output) ? ": " + mkdir.output.trim() : "";
+            throw new DockerOperationException("failed to create managed skills container dir " + containerDir + details);
         }
     }
 
@@ -1875,8 +1912,9 @@ public class DockerRuntimeService {
                 continue;
             }
             String skillKey = valueAsString(itemMap.get("skillKey"));
-            String skillMd = valueAsString(itemMap.get("skillMd"));
-            resolved.add(new ManagedSkillAssetRecord(skillKey, skillMd));
+            String sourceType = valueAsString(itemMap.get("sourceType"));
+            String sourceRef = valueAsString(itemMap.get("sourceRef"));
+            resolved.add(new ManagedSkillAssetRecord(skillKey, sourceType, sourceRef));
         }
         return normalizeManagedSkillAssets(resolved);
     }
@@ -1891,9 +1929,65 @@ public class DockerRuntimeService {
                 continue;
             }
             String skillKey = asset.skillKey().trim();
-            normalized.put(skillKey, new ManagedSkillAssetRecord(skillKey, asset.skillMd() == null ? "" : asset.skillMd()));
+            String sourceType = normalizeManagedSkillSourceType(asset.sourceType());
+            String sourceRef = asset.sourceRef() == null ? null : asset.sourceRef().trim();
+            normalized.put(skillKey, new ManagedSkillAssetRecord(skillKey, sourceType, sourceRef));
         }
         return List.copyOf(normalized.values());
+    }
+
+    private String normalizeManagedSkillSourceType(String value) {
+        if (!StringUtils.hasText(value)) {
+            return SERVER_PACKAGE_SOURCE_TYPE;
+        }
+        return value.trim().toUpperCase();
+    }
+
+    private Path resolveManagedSkillPackageDir(ManagedSkillAssetRecord asset) throws IOException {
+        if (!SERVER_PACKAGE_SOURCE_TYPE.equalsIgnoreCase(asset.sourceType())) {
+            throw new DockerOperationException("unsupported managed skill sourceType for " + asset.skillKey() + ": " + asset.sourceType());
+        }
+        if (!StringUtils.hasText(asset.sourceRef())) {
+            throw new DockerOperationException("managed skill sourceRef is required for " + asset.skillKey());
+        }
+        String configuredRoot = properties.getSkillPackagesRootPath();
+        if (!StringUtils.hasText(configuredRoot)) {
+            throw new DockerOperationException("managed skill packages root path is blank");
+        }
+        Path rootDir = Path.of(configuredRoot.trim()).normalize();
+        Path resolvedDir = rootDir.resolve(asset.sourceRef().trim()).normalize();
+        if (!resolvedDir.startsWith(rootDir)) {
+            throw new DockerOperationException("managed skill sourceRef escapes root dir: " + asset.sourceRef());
+        }
+        if (!Files.isDirectory(resolvedDir)) {
+            throw new DockerOperationException("managed skill package not found: " + resolvedDir);
+        }
+        Path skillMd = resolvedDir.resolve("SKILL.md");
+        if (!Files.isRegularFile(skillMd)) {
+            throw new DockerOperationException("managed skill package missing SKILL.md: " + resolvedDir);
+        }
+        return resolvedDir;
+    }
+
+    private void copyDirectoryContents(Path sourceDir, Path targetDir) throws IOException {
+        try (var paths = Files.walk(sourceDir)) {
+            for (Path sourcePath : paths.toList()) {
+                Path relativePath = sourceDir.relativize(sourcePath);
+                if (relativePath.toString().isEmpty()) {
+                    continue;
+                }
+                Path targetPath = targetDir.resolve(relativePath.toString());
+                if (Files.isDirectory(sourcePath)) {
+                    Files.createDirectories(targetPath);
+                    continue;
+                }
+                Path parent = targetPath.getParent();
+                if (parent != null) {
+                    Files.createDirectories(parent);
+                }
+                Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            }
+        }
     }
 
     private String valueAsString(Object value) {

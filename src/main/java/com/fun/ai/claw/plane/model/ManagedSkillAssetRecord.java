@@ -2,6 +2,7 @@ package com.fun.ai.claw.plane.model;
 
 public record ManagedSkillAssetRecord(
         String skillKey,
-        String skillMd
+        String sourceType,
+        String sourceRef
 ) {
 }

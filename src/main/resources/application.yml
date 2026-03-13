@@ -48,6 +48,7 @@ app:
     instance-skills-host-path-template: /data/funai/fun-ai-claw/instance-skills/{instanceId}
     instance-skills-container-path: /workspace/open-skills/skills
     instance-skills-mount-read-only: true
+    skill-packages-root-path: ${DOCKER_SKILL_PACKAGES_ROOT_PATH:/opt/fun-ai-claw/skills}
     workspace-agents-auto-sync-enabled: true
     workspace-agents-file-path: /zeroclaw-data/workspace/AGENTS.md
     runtime-config-policy-enabled: ${DOCKER_RUNTIME_CONFIG_POLICY_ENABLED:false}
