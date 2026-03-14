@@ -51,6 +51,7 @@ public class DockerRuntimeService {
     private static final String MANAGED_SKILLS_PAYLOAD_KEY = "managedSkills";
     private static final String SERVER_PACKAGE_SOURCE_TYPE = "SERVER_PACKAGE";
     private static final Pattern LONG_OPTION_PATTERN = Pattern.compile("--[a-zA-Z0-9][a-zA-Z0-9-]*");
+    private static final Pattern CONTAINER_CMD_FIRST_ARG_PATTERN = Pattern.compile("^\\s*\\[\\s*\"([^\"]+)\"");
     private static final Pattern REQUIRE_PAIRING_PATTERN =
             Pattern.compile("(?m)^\\s*require_pairing\\s*=\\s*(true|false)\\s*$");
     private static final Pattern GATEWAY_HOST_PATTERN =
@@ -83,6 +84,10 @@ public class DockerRuntimeService {
             Pattern.compile("(?ms)^\\s*literals\\s*=\\s*\\[(.*?)]\\s*$");
     private static final Pattern QUOTED_STRING_PATTERN =
             Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
+    private static final String RUNTIME_COMMAND_GATEWAY = "gateway";
+    private static final String RUNTIME_COMMAND_DAEMON = "daemon";
+    private static final String CHANNELS_CONFIG_ROOT = "channels_config";
+    private static final String CHANNELS_CONFIG_WEBHOOK = "channels_config.webhook";
     private static final String LEGACY_NOVEL_SCRIPT_HINT = "novel_script";
     private static final Set<String> NOVEL_SCRIPT_RULE_KEYWORDS = Set.of(
             "小说转剧本",
@@ -99,7 +104,7 @@ public class DockerRuntimeService {
     );
     private final DockerRuntimeProperties properties;
     private final ResourceLoader resourceLoader;
-    private final Map<String, Set<String>> gatewayOptionsByImage = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> runtimeCommandOptionsByImage = new ConcurrentHashMap<>();
     private final HttpClient healthProbeClient;
 
     public DockerRuntimeService(DockerRuntimeProperties properties,
@@ -233,15 +238,16 @@ public class DockerRuntimeService {
         List<ManagedSkillAssetRecord> normalizedAssets = normalizeManagedSkillAssets(managedSkillAssets);
         materializeManagedSkillsHostDir(instanceId, gatewayHostPort, normalizedAssets);
         boolean createdNow = false;
-        if (containerExists(containerName) && requiresManagedSkillsMountUpgrade(containerName)) {
-            recreateContainerWithManagedSkillsMount(containerName, instanceId, image, gatewayHostPort);
+        if (containerExists(containerName)
+                && requiresContainerRecreation(containerName, configTomlContent)) {
+            recreateContainer(containerName, instanceId, image, gatewayHostPort, configTomlContent);
             createdNow = true;
         }
         if (!containerExists(containerName)) {
             if (!StringUtils.hasText(image)) {
                 throw new DockerOperationException("image is required to create container");
             }
-            createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
+            createContainer(containerName, instanceId, image.trim(), gatewayHostPort, configTomlContent);
             createdNow = true;
         }
 
@@ -298,8 +304,9 @@ public class DockerRuntimeService {
         List<ManagedSkillAssetRecord> normalizedAssets = normalizeManagedSkillAssets(managedSkillAssets);
         materializeManagedSkillsHostDir(instanceId, gatewayHostPort, normalizedAssets);
         boolean recreatedNow = false;
-        if (containerExists(containerName) && requiresManagedSkillsMountUpgrade(containerName)) {
-            recreateContainerWithManagedSkillsMount(containerName, instanceId, image, gatewayHostPort);
+        if (containerExists(containerName)
+                && requiresContainerRecreation(containerName, configTomlContent)) {
+            recreateContainer(containerName, instanceId, image, gatewayHostPort, configTomlContent);
             recreatedNow = true;
         }
         if (!containerExists(containerName) || recreatedNow) {
@@ -307,7 +314,7 @@ public class DockerRuntimeService {
                 throw new DockerOperationException("image is required to create container for restart");
             }
             if (!recreatedNow) {
-                createContainer(containerName, instanceId, image.trim(), gatewayHostPort);
+                createContainer(containerName, instanceId, image.trim(), gatewayHostPort, configTomlContent);
             }
             try {
                 syncRuntimeConfigToml(containerName, configTomlContent, configTomlOverwrite);
@@ -341,19 +348,25 @@ public class DockerRuntimeService {
         return !containerHasMountDestination(containerName, normalizeManagedSkillsContainerPath());
     }
 
-    private void recreateContainerWithManagedSkillsMount(String containerName,
-                                                         UUID instanceId,
-                                                         String image,
-                                                         Integer gatewayHostPort) {
+    private boolean requiresContainerRecreation(String containerName, String configTomlContent) {
+        return requiresManagedSkillsMountUpgrade(containerName)
+                || requiresRuntimeCommandUpgrade(containerName, configTomlContent);
+    }
+
+    private void recreateContainer(String containerName,
+                                   UUID instanceId,
+                                   String image,
+                                   Integer gatewayHostPort,
+                                   String configTomlContent) {
         String effectiveImage = StringUtils.hasText(image) ? image.trim() : inspectContainerImage(containerName);
         if (!StringUtils.hasText(effectiveImage)) {
-            throw new DockerOperationException("image is required to recreate legacy container with managed skills mount");
+            throw new DockerOperationException("image is required to recreate container");
         }
         if (containerRunning(containerName)) {
-            runDockerChecked(List.of(properties.getCommand(), "stop", containerName), "failed to stop legacy container");
+            runDockerChecked(List.of(properties.getCommand(), "stop", containerName), "failed to stop container before recreate");
         }
-        runDockerChecked(List.of(properties.getCommand(), "rm", containerName), "failed to remove legacy container");
-        createContainer(containerName, instanceId, effectiveImage, gatewayHostPort);
+        runDockerChecked(List.of(properties.getCommand(), "rm", containerName), "failed to remove container before recreate");
+        createContainer(containerName, instanceId, effectiveImage, gatewayHostPort, configTomlContent);
     }
 
     private String deleteInstance(UUID instanceId) {
@@ -381,12 +394,17 @@ public class DockerRuntimeService {
         return "Container deleted: " + containerName;
     }
 
-    private void createContainer(String containerName, UUID instanceId, String image, Integer gatewayHostPort) {
+    private void createContainer(String containerName,
+                                 UUID instanceId,
+                                 String image,
+                                 Integer gatewayHostPort,
+                                 String configTomlContent) {
         int hostPort = gatewayHostPort != null ? gatewayHostPort : properties.getGatewayHostPort();
         if (hostPort <= 0 || hostPort > 65535) {
             throw new DockerOperationException("invalid gateway host port: " + hostPort);
         }
         String gatewayConfigDir = resolveTemplate(properties.getGatewayConfigDirTemplate(), instanceId, hostPort);
+        String runtimeCommand = determineRuntimeCommand(configTomlContent);
 
         List<String> command = new ArrayList<>();
         command.add(properties.getCommand());
@@ -422,14 +440,15 @@ public class DockerRuntimeService {
         appendAgentWorkspaceMountArgs(command, instanceId, hostPort);
         appendInstanceSkillsMountArgs(command, instanceId, hostPort);
         command.add(image);
-        command.add("gateway");
+        command.add(runtimeCommand);
         command.add("--host");
         command.add(properties.getGatewayHost());
         command.add("--port");
         command.add(String.valueOf(properties.getGatewayContainerPort()));
-        Set<String> supportedOptions = detectGatewayOptions(image);
+        Set<String> supportedOptions = detectRuntimeCommandOptions(image, runtimeCommand);
         appendGatewaySecurityArgs(command, supportedOptions);
         appendGatewayPathRoutingArgs(command, supportedOptions, instanceId, hostPort, gatewayConfigDir);
+        log.info("create container {} with runtime command {}", containerName, runtimeCommand);
         runDockerChecked(command, "failed to create container");
     }
 
@@ -838,15 +857,16 @@ public class DockerRuntimeService {
                 .replace("{gatewayContainerPort}", String.valueOf(properties.getGatewayContainerPort()));
     }
 
-    private Set<String> detectGatewayOptions(String image) {
-        return gatewayOptionsByImage.computeIfAbsent(image, this::fetchGatewayOptions);
+    private Set<String> detectRuntimeCommandOptions(String image, String runtimeCommand) {
+        String cacheKey = image + "|" + runtimeCommand;
+        return runtimeCommandOptionsByImage.computeIfAbsent(cacheKey, key -> fetchRuntimeCommandOptions(image, runtimeCommand));
     }
 
-    private Set<String> fetchGatewayOptions(String image) {
-        List<String> command = List.of(properties.getCommand(), "run", "--rm", image, "gateway", "--help");
+    private Set<String> fetchRuntimeCommandOptions(String image, String runtimeCommand) {
+        List<String> command = List.of(properties.getCommand(), "run", "--rm", image, runtimeCommand, "--help");
         CommandResult result = runDocker(command);
         if (result.exitCode != 0) {
-            log.warn("failed to inspect zeroclaw gateway help for image {}: {}", image, result.output);
+            log.warn("failed to inspect zeroclaw {} help for image {}: {}", runtimeCommand, image, result.output);
             return Set.of();
         }
 
@@ -856,11 +876,82 @@ public class DockerRuntimeService {
             options.add(matcher.group());
         }
         if (options.isEmpty()) {
-            log.warn("no long options detected from zeroclaw gateway help for image {}", image);
+            log.warn("no long options detected from zeroclaw {} help for image {}", runtimeCommand, image);
             return Set.of();
         }
-        log.info("detected zeroclaw gateway options for image {}: {}", image, options);
+        log.info("detected zeroclaw {} options for image {}: {}", runtimeCommand, image, options);
         return Set.copyOf(options);
+    }
+
+    private boolean requiresRuntimeCommandUpgrade(String containerName, String configTomlContent) {
+        if (!containerExists(containerName)) {
+            return false;
+        }
+        String desiredRuntimeCommand = determineRuntimeCommand(configTomlContent);
+        String currentRuntimeCommand = inspectContainerRuntimeCommand(containerName);
+        if (!StringUtils.hasText(currentRuntimeCommand)) {
+            return false;
+        }
+        boolean needsUpgrade = !desiredRuntimeCommand.equals(currentRuntimeCommand);
+        if (needsUpgrade) {
+            log.info("container {} runtime command upgrade required: current={}, desired={}",
+                    containerName, currentRuntimeCommand, desiredRuntimeCommand);
+        }
+        return needsUpgrade;
+    }
+
+    private String determineRuntimeCommand(String configTomlContent) {
+        return hasSupervisedChannelConfigured(configTomlContent) ? RUNTIME_COMMAND_DAEMON : RUNTIME_COMMAND_GATEWAY;
+    }
+
+    private boolean hasSupervisedChannelConfigured(String configTomlContent) {
+        if (!StringUtils.hasText(configTomlContent)) {
+            return false;
+        }
+        Matcher matcher = SECTION_HEADER_PATTERN.matcher(configTomlContent);
+        while (matcher.find()) {
+            String normalizedHeader = normalizeSectionHeader(matcher.group());
+            if (!normalizedHeader.startsWith(CHANNELS_CONFIG_ROOT + ".")) {
+                continue;
+            }
+            if (CHANNELS_CONFIG_WEBHOOK.equals(normalizedHeader)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private String normalizeSectionHeader(String rawHeader) {
+        if (!StringUtils.hasText(rawHeader)) {
+            return "";
+        }
+        String trimmed = rawHeader.trim();
+        if (trimmed.startsWith("[[") && trimmed.endsWith("]]")) {
+            return trimmed.substring(2, trimmed.length() - 2).trim();
+        }
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            return trimmed.substring(1, trimmed.length() - 1).trim();
+        }
+        return trimmed;
+    }
+
+    private String inspectContainerRuntimeCommand(String containerName) {
+        CommandResult inspect = runDocker(List.of(
+                properties.getCommand(),
+                "inspect",
+                "-f",
+                "{{json .Config.Cmd}}",
+                containerName
+        ));
+        if (inspect.exitCode != 0 || !StringUtils.hasText(inspect.output)) {
+            return null;
+        }
+        Matcher matcher = CONTAINER_CMD_FIRST_ARG_PATTERN.matcher(inspect.output.trim());
+        if (!matcher.find()) {
+            return null;
+        }
+        return matcher.group(1).trim();
     }
 
     private boolean containerExists(String containerName) {
