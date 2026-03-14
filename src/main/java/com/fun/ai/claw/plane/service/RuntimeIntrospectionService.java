@@ -43,6 +43,7 @@ public class RuntimeIntrospectionService {
     private static final Pattern SYSTEM_PROMPT_MULTILINE_LITERAL_PATTERN = Pattern.compile("(?ms)^\\s*system_prompt\\s*=\\s*'''(.*?)'''\\s*$");
     private static final Pattern AGENTIC_PATTERN = Pattern.compile("(?m)^\\s*agentic\\s*=\\s*(true|false)\\s*$", Pattern.CASE_INSENSITIVE);
     private static final Pattern ALLOWED_TOOLS_PATTERN = Pattern.compile("(?ms)^\\s*allowed_tools\\s*=\\s*\\[(.*?)]\\s*$");
+    private static final Pattern ALLOWED_SKILLS_PATTERN = Pattern.compile("(?ms)^\\s*allowed_skills\\s*=\\s*\\[(.*?)]\\s*$");
     private static final Pattern ARRAY_QUOTED_STRING_PATTERN = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"|'((?:\\\\.|[^'\\\\])*)'");
     private static final Pattern SKILLS_BLOCK_PATTERN = Pattern.compile(
             "(?ms)^\\s*\\[\\s*skills\\s*]\\s*(.*?)(?=^\\s*\\[[^\\]]+\\]|\\z)"
@@ -283,6 +284,7 @@ public class RuntimeIntrospectionService {
                     findStringValue(MODEL_PATTERN, block),
                     findBooleanValue(AGENTIC_PATTERN, block),
                     findStringArrayValue(ALLOWED_TOOLS_PATTERN, block),
+                    findStringArrayValue(ALLOWED_SKILLS_PATTERN, block),
                     findSystemPromptValue(block),
                     resolvedConfigPath
             ));
