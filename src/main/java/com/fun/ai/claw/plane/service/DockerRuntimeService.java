@@ -86,6 +86,7 @@ public class DockerRuntimeService {
             Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final String RUNTIME_COMMAND_GATEWAY = "gateway";
     private static final String RUNTIME_COMMAND_DAEMON = "daemon";
+    private static final String ZEROCLAW_CONTROL_PATH = "/usr/local/bin/zeroclaw-control";
     private static final String CHANNELS_CONFIG_ROOT = "channels_config";
     private static final String CHANNELS_CONFIG_WEBHOOK = "channels_config.webhook";
     private static final String LEGACY_NOVEL_SCRIPT_HINT = "novel_script";
@@ -134,6 +135,7 @@ public class DockerRuntimeService {
             case STOP -> stopInstance(instanceId);
             case RESTART, ROLLBACK -> restartInstance(instanceId, image, gatewayHostPort, agentsMdContent, agentsMdOverwrite,
                     configTomlContent, configTomlOverwrite, managedSkillAssets);
+            case RESTART_ZEROCLAW -> restartZeroclawProcess(instanceId, gatewayHostPort);
             case DELETE -> deleteInstance(instanceId);
         };
     }
@@ -339,6 +341,36 @@ public class DockerRuntimeService {
         enforceRuntimeConfigPolicy(containerName, instanceId, gatewayHostPort, configTomlContent != null);
         waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
         return "Container restarted: " + containerName;
+    }
+
+    private String restartZeroclawProcess(UUID instanceId, Integer gatewayHostPort) {
+        String containerName = containerName(instanceId);
+        if (!containerExists(containerName)) {
+            throw new DockerOperationException("container does not exist: " + containerName);
+        }
+        if (!containerRunning(containerName)) {
+            throw new DockerOperationException("container is not running: " + containerName);
+        }
+        if (!fileExistsInContainer(containerName, ZEROCLAW_CONTROL_PATH)) {
+            throw new DockerOperationException(
+                    "runtime image does not support in-container zeroclaw restart; rebuild the runtime image and recreate the instance"
+            );
+        }
+
+        CommandResult restart = runDocker(List.of(
+                properties.getCommand(),
+                "exec",
+                containerName,
+                ZEROCLAW_CONTROL_PATH,
+                "restart"
+        ));
+        if (restart.exitCode != 0) {
+            String details = restart.output == null ? "" : restart.output.trim();
+            throw new DockerOperationException("failed to restart zeroclaw process: " + details);
+        }
+
+        waitForGatewayReady(containerName, resolveGatewayHostPortForProbe(containerName, gatewayHostPort));
+        return "zeroclaw restarted in container: " + containerName;
     }
 
     private boolean requiresManagedSkillsMountUpgrade(String containerName) {
